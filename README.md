@@ -154,14 +154,14 @@ StoryForge operates as a first-class VS Code extension and registers the `@story
 
 ```bash
 # Install dependencies
-npm install
+pnpm install
 
 # Type check and run all test suites
-npm run check
+pnpm run check
 
 # Run tests
-npm test
+pnpm test
 
 # Build extension bundle
-npm run build:extension
+pnpm run build:extension
 ```

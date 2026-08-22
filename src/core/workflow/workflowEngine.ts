@@ -172,6 +172,169 @@ export class WorkflowEngine {
   }
 
   /**
+   * Refine and iterate feature discovery context with user guidance.
+   */
+  async iterateDiscovery(workflowId: string, guidance: string): Promise<WorkflowState> {
+    const state = this.workflows.get(workflowId);
+    if (!state || !state.discoveryContext || !state.featureInput) {
+      throw new Error(`Workflow ${workflowId} not found or missing discovery context.`);
+    }
+
+    log.info('Iterating feature discovery', { workflowId, guidance });
+
+    const currentDiscovery = state.discoveryContext;
+    const additionalKeywords = guidance.toLowerCase().split(/\s+/).filter((w) => w.length > 2);
+    const combinedKeywords = [...new Set([...state.featureInput.keywords, ...additionalKeywords])];
+
+    // Rebuild discovery context with added guidance
+    const refined = this.intelligence.buildDiscoveryContext(
+      `${state.featureInput.title}: ${state.featureInput.description}\nGuidance: ${guidance}`,
+      combinedKeywords,
+    );
+
+    const now = Date.now();
+    const updatedState: WorkflowState = {
+      ...state,
+      discoveryContext: refined,
+      conversationHistory: [
+        ...state.conversationHistory,
+        { role: 'user', content: `Refine Discovery: ${guidance}`, timestamp: now, phase: 'discovery-review' },
+        { role: 'storyforge', content: `Discovery refined with guidance. Generation ${refined.repositoryUnderstanding.generation}.`, timestamp: now, phase: 'discovery-review', evidence: refined.evidence },
+      ],
+      updatedAt: now,
+    };
+
+    this.workflows.set(workflowId, updatedState);
+    return updatedState;
+  }
+
+  /**
+   * Answer an unresolved question in the discovery context.
+   */
+  answerQuestion(workflowId: string, questionId: string, answer: string): WorkflowState {
+    const state = this.workflows.get(workflowId);
+    if (!state || !state.discoveryContext) {
+      throw new Error(`Workflow ${workflowId} not found.`);
+    }
+
+    const discovery = state.discoveryContext;
+    const questions = discovery.repositoryUnderstanding.unresolvedQuestions.map((q) => {
+      if (q.question.includes(questionId) || q.context.includes(questionId)) {
+        return { ...q, context: `${q.context} (Answered: ${answer})` };
+      }
+      return q;
+    });
+
+    const updatedState: WorkflowState = {
+      ...state,
+      discoveryContext: {
+        ...discovery,
+        repositoryUnderstanding: {
+          ...discovery.repositoryUnderstanding,
+          unresolvedQuestions: questions,
+        },
+      },
+      updatedAt: Date.now(),
+    };
+
+    this.workflows.set(workflowId, updatedState);
+    return updatedState;
+  }
+
+  /**
+   * Add a manual user story or QA story to the workflow.
+   */
+  addManualStory(
+    workflowId: string,
+    kind: 'user' | 'qa',
+    title: string,
+    description: string,
+  ): WorkflowState {
+    const state = this.workflows.get(workflowId);
+    if (!state) throw new Error(`Workflow ${workflowId} not found.`);
+
+    if (kind === 'user') {
+      const newStory: UserStory = {
+        id: `US-${Date.now().toString(36).slice(-4).toUpperCase()}`,
+        title,
+        description,
+        asA: 'User',
+        iWant: title,
+        soThat: description,
+        acceptanceCriteria: [
+          {
+            id: 'AC-1',
+            given: 'The system is in a normal state',
+            when: `The user executes ${title}`,
+            then: 'The expected outcome is achieved successfully',
+          },
+        ],
+        storyPoints: 3,
+        priority: 'medium',
+        affectedComponents: [],
+        evidence: [],
+        status: 'approved',
+      };
+
+      const updatedStories = [...(state.stories || []), newStory];
+      const updatedState = { ...state, stories: updatedStories, updatedAt: Date.now() };
+      this.workflows.set(workflowId, updatedState);
+      return updatedState;
+    } else {
+      const newQaStory: QaStory = {
+        id: `QA-${Date.now().toString(36).slice(-4).toUpperCase()}`,
+        title,
+        description,
+        relatedUserStoryId: state.stories?.[0]?.id || 'US-101',
+        testType: 'functional',
+        scenarios: [
+          {
+            id: 'SC-1',
+            name: `Validate ${title}`,
+            steps: ['Initialize test fixture', `Execute ${title}`, 'Verify results'],
+            expectedResult: 'Operation succeeds without error.',
+            testType: 'positive',
+          },
+        ],
+        preconditions: ['Environment configured'],
+        priority: 'medium',
+        status: 'approved',
+      };
+
+      const updatedQaStories = [...(state.qaStories || []), newQaStory];
+      const updatedState = { ...state, qaStories: updatedQaStories, updatedAt: Date.now() };
+      this.workflows.set(workflowId, updatedState);
+      return updatedState;
+    }
+  }
+
+  /**
+   * Update status of stories (approve or reject).
+   */
+  updateStoryStatus(
+    workflowId: string,
+    storyIds: string[],
+    status: 'approved' | 'rejected',
+  ): WorkflowState {
+    const state = this.workflows.get(workflowId);
+    if (!state) throw new Error(`Workflow ${workflowId} not found.`);
+
+    const idSet = new Set(storyIds);
+    const updatedStories = (state.stories || []).map((s) => (idSet.has(s.id) ? { ...s, status } : s));
+    const updatedQaStories = (state.qaStories || []).map((q) => (idSet.has(q.id) ? { ...q, status } : q));
+
+    const updatedState: WorkflowState = {
+      ...state,
+      stories: updatedStories,
+      qaStories: updatedQaStories,
+      updatedAt: Date.now(),
+    };
+
+    this.workflows.set(workflowId, updatedState);
+    return updatedState;
+  }
+
+  /**
    * Audit all active stories in workflows for staleness against modified files.
    */
   auditWorkflows(changedFiles: string[]): StalenessAuditReport {

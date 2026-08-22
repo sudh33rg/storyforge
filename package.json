@@ -27,6 +27,11 @@
   "contributes": {
     "commands": [
       {
+        "command": "storyforge.open",
+        "title": "StoryForge: Open Dashboard",
+        "icon": "$(window)"
+      },
+      {
         "command": "storyforge.refreshIntelligence",
         "title": "StoryForge: Refresh Intelligence",
         "icon": "$(refresh)"
@@ -62,11 +67,13 @@
       "storyforge": [
         {
           "id": "storyforge.intelligence",
-          "name": "Intelligence"
+          "name": "Intelligence",
+          "icon": "$(graph)"
         },
         {
           "id": "storyforge.workflow",
-          "name": "Workflow"
+          "name": "Workflow",
+          "icon": "$(tools)"
         }
       ]
     },
@@ -176,22 +183,28 @@
       }
     }
   },
+  "packageManager": "pnpm@11.11.0",
   "scripts": {
-    "build": "npm run build:extension && npm run build:webview",
+    "build": "pnpm run build:extension",
     "build:extension": "node esbuild.config.mjs",
-    "build:webview": "cd webview && npx vite build",
     "watch": "node esbuild.config.mjs --watch",
     "test": "vitest run",
     "test:watch": "vitest",
     "check": "tsc --noEmit && vitest run",
-    "package": "npx @vscode/vsce package --no-dependencies",
+    "package": "vsce package --no-dependencies",
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@xyflow/react": "^12.11.3",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "react-force-graph-2d": "^1.29.1",
     "web-tree-sitter": "^0.24.7"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.4",
     "@types/vscode": "^1.95.0",
     "@vscode/vsce": "^3.2.0",
     "esbuild": "^0.24.2",

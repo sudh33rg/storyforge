@@ -1,9 +1,9 @@
 /**
- * Tree-sitter Parser
+ * Tree-sitter & Universal Structural Parser
  *
- * Wraps web-tree-sitter for portable WASM-based AST parsing.
- * Falls back to regex-based language adapters when WASM grammars
- * are unavailable.
+ * Wraps language adapters for AST/CST structural extraction across languages.
+ * Extracts symbols, imports, API endpoints, SQL schemas, Docker infrastructure,
+ * and documentation sections.
  */
 
 import type {
@@ -14,9 +14,15 @@ import type {
 } from '../../shared/types.js';
 import { ParserError } from '../../shared/errors.js';
 import { createLogger } from '../../shared/logger.js';
-import { getLanguageAdapter, type DetectedApiEndpoint } from './languageAdapters.js';
+import {
+  getLanguageAdapter,
+  type DetectedApiEndpoint,
+  type DetectedSqlTable,
+  type DetectedDockerService,
+  type DetectedDocSection,
+} from './languageAdapters.js';
 
-const log = createLogger('intelligence:parser:treesitter');
+const log = createLogger('intelligence:parser:universal');
 
 /**
  * Result of parsing a single file.
@@ -27,15 +33,15 @@ export interface FileParseResult {
   readonly symbols: ParsedSymbol[];
   readonly imports: ParsedImport[];
   readonly apiEndpoints: DetectedApiEndpoint[];
+  readonly sqlTables: DetectedSqlTable[];
+  readonly dockerServices: DetectedDockerService[];
+  readonly docSections: DetectedDocSection[];
   readonly parseTimeMs: number;
   readonly usedTreeSitter: boolean;
 }
 
 /**
  * Parse a source file and extract all structural information.
- *
- * Currently uses regex-based fallback parsers.
- * Tree-sitter WASM integration will be layered on top when grammars are available.
  */
 export function parseFile(
   sourceCode: string,
@@ -57,6 +63,9 @@ export function parseFile(
     const symbols = adapter.extractSymbols(sourceCode, filePath);
     const imports = adapter.extractImports(sourceCode, filePath);
     const apiEndpoints = adapter.detectApiEndpoints?.(sourceCode, filePath, symbols) ?? [];
+    const sqlTables = adapter.extractSqlTables?.(sourceCode, filePath) ?? [];
+    const dockerServices = adapter.extractDockerServices?.(sourceCode, filePath) ?? [];
+    const docSections = adapter.extractDocSections?.(sourceCode, filePath) ?? [];
 
     const parseTimeMs = performance.now() - startTime;
 
@@ -66,6 +75,9 @@ export function parseFile(
       symbols: symbols.length,
       imports: imports.length,
       apiEndpoints: apiEndpoints.length,
+      sqlTables: sqlTables.length,
+      dockerServices: dockerServices.length,
+      docSections: docSections.length,
       parseTimeMs: Math.round(parseTimeMs * 100) / 100,
     });
 
@@ -75,8 +87,11 @@ export function parseFile(
       symbols,
       imports,
       apiEndpoints,
+      sqlTables,
+      dockerServices,
+      docSections,
       parseTimeMs,
-      usedTreeSitter: false, // Will be true when Tree-sitter WASM is loaded
+      usedTreeSitter: false,
     };
   } catch (err) {
     throw new ParserError(
@@ -89,7 +104,6 @@ export function parseFile(
 
 /**
  * Parse multiple files in batch.
- * Returns results for files that parsed successfully, with errors logged.
  */
 export function parseFiles(
   files: Array<{ sourceCode: string; filePath: RelativePath; language: SupportedLanguage }>,

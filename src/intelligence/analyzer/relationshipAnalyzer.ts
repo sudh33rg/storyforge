@@ -5,24 +5,25 @@
  * in the knowledge graph (Level 8: Relationships):
  *
  * - Import/dependency relationships
- * - Call chains
+ * - Call chains & method invocations (STATIC CALL GRAPH — cross-file)
  * - Inheritance and implementation hierarchies
- * - API flows
- * - Type references
+ * - API flows & route handlers
+ * - SQL Table foreign keys & Model-to-Table mappings
+ * - Container & infrastructure dependencies
  *
- * Each relationship is created with evidence and confidence scoring.
+ * GAP 2 FIX: The static call graph now wires ParsedCallSite[] data
+ * from every parsed symbol into 'calls' edges in the knowledge graph,
+ * enabling accurate impact analysis, caller/callee queries, and blast-radius UI.
  */
 
 import * as path from 'path';
 import { createLogger } from '../../shared/logger.js';
-import type { Evidence, RelativePath, ResolutionStatus } from '../../shared/types.js';
+import type { Evidence, RelativePath } from '../../shared/types.js';
 import type { KnowledgeGraph } from '../graph/knowledgeGraph.js';
 import { createGraphNode } from '../graph/graphNode.js';
-import type { GraphEdgeType } from '../graph/graphEdge.js';
 import {
   CONFIDENCE_HIGH,
   CONFIDENCE_MEDIUM,
-  CONFIDENCE_LOW,
 } from '../graph/graphEdge.js';
 import type { FileParseResult } from '../parser/treeSitterParser.js';
 
@@ -36,29 +37,35 @@ export function buildRelationships(
   parseResults: FileParseResult[],
   generation: number,
 ): { edgesCreated: number; edgesUpdated: number } {
-  let edgesCreated = 0;
-  let edgesUpdated = 0;
-
   const initialEdgeCount = graph.getStats().edgeCount;
 
-  // Build import relationships
+  // 1. Build import relationships
   for (const result of parseResults) {
-    edgesCreated += buildImportRelationships(graph, result, parseResults, generation);
+    buildImportRelationships(graph, result, parseResults, generation);
   }
 
-  // Build inheritance/implementation relationships
+  // 2. Build inheritance/implementation relationships
   for (const result of parseResults) {
-    edgesCreated += buildTypeRelationships(graph, result, parseResults, generation);
+    buildTypeRelationships(graph, result, parseResults, generation);
   }
 
-  // Build API flow relationships
-  edgesCreated += buildApiFlowRelationships(graph, parseResults, generation);
+  // 3. Build API flow relationships
+  buildApiFlowRelationships(graph, parseResults, generation);
+
+  // 4. Build SQL schema foreign key relationships
+  buildSqlSchemaRelationships(graph, parseResults, generation);
+
+  // 5. Build Model to Table mapping relationships
+  buildModelTableRelationships(graph, parseResults, generation);
+
+  // 6. Build static call graph (GAP 2 — wires ParsedCallSite[] into 'calls' edges)
+  buildCallGraphRelationships(graph, parseResults, generation);
 
   const finalEdgeCount = graph.getStats().edgeCount;
-  edgesCreated = finalEdgeCount - initialEdgeCount;
+  const edgesCreated = finalEdgeCount - initialEdgeCount;
 
-  log.info('Relationships built', { edgesCreated, edgesUpdated });
-  return { edgesCreated, edgesUpdated };
+  log.info('Relationships built', { edgesCreated, totalEdges: finalEdgeCount });
+  return { edgesCreated, edgesUpdated: 0 };
 }
 
 // ─── Import Relationships ────────────────────────────────────────────────────
@@ -68,14 +75,11 @@ function buildImportRelationships(
   result: FileParseResult,
   allResults: FileParseResult[],
   generation: number,
-): number {
-  let count = 0;
+): void {
   const sourceFileId = `file:${result.filePath}`;
-
-  if (!graph.hasNode(sourceFileId)) return 0;
+  if (!graph.hasNode(sourceFileId)) return;
 
   for (const imp of result.imports) {
-    // Resolve the import to a target file
     const targetFilePath = resolveImportPath(result.filePath, imp.source, allResults);
 
     if (targetFilePath) {
@@ -97,9 +101,7 @@ function buildImportRelationships(
           CONFIDENCE_HIGH,
           [evidence],
         );
-        count++;
 
-        // Also create edges for specific imported symbols
         for (const specifier of imp.specifiers) {
           const targetSymbol = findSymbolInFile(graph, targetFilePath, specifier);
           if (targetSymbol) {
@@ -117,12 +119,10 @@ function buildImportRelationships(
                 confidence: CONFIDENCE_HIGH,
               }],
             );
-            count++;
           }
         }
       }
     } else if (isExternalPackage(imp.source)) {
-      // Create external dependency node if it doesn't exist
       const extDepId = `ext:${imp.source}`;
       if (!graph.hasNode(extDepId)) {
         graph.addNode(
@@ -146,11 +146,8 @@ function buildImportRelationships(
           confidence: CONFIDENCE_HIGH,
         }],
       );
-      count++;
     }
   }
-
-  return count;
 }
 
 // ─── Type Relationships (Inheritance/Implementation) ─────────────────────────
@@ -160,17 +157,14 @@ function buildTypeRelationships(
   result: FileParseResult,
   allResults: FileParseResult[],
   generation: number,
-): number {
-  let count = 0;
-
+): void {
   for (const symbol of result.symbols) {
-    const symbolId = ['class', 'interface', 'struct', 'enum'].includes(symbol.kind)
+    const symbolId = ['class', 'interface', 'struct', 'trait', 'impl', 'enum'].includes(symbol.kind)
       ? `component:${symbol.qualifiedName}`
       : `symbol:${symbol.qualifiedName}`;
 
     if (!graph.hasNode(symbolId)) continue;
 
-    // Extends relationship
     if (symbol.extendsType) {
       const parentId = findTypeByName(graph, symbol.extendsType, allResults);
       if (parentId) {
@@ -181,17 +175,9 @@ function buildTypeRelationships(
           resolution: 'confirmed',
           confidence: CONFIDENCE_HIGH,
         }]);
-        count++;
-      } else {
-        // Heuristic: type exists but we couldn't resolve it
-        log.debug('Unresolved extends', {
-          symbol: symbol.name,
-          extends: symbol.extendsType,
-        });
       }
     }
 
-    // Implements relationship
     if (symbol.implementsTypes) {
       for (const impl of symbol.implementsTypes) {
         const interfaceId = findTypeByName(graph, impl, allResults);
@@ -203,13 +189,10 @@ function buildTypeRelationships(
             resolution: 'confirmed',
             confidence: CONFIDENCE_HIGH,
           }]);
-          count++;
         }
       }
     }
   }
-
-  return count;
 }
 
 // ─── API Flow Relationships ──────────────────────────────────────────────────
@@ -218,22 +201,18 @@ function buildApiFlowRelationships(
   graph: KnowledgeGraph,
   parseResults: FileParseResult[],
   generation: number,
-): number {
-  let count = 0;
-
-  // Find API endpoints and trace to their handlers
+): void {
   for (const result of parseResults) {
     for (const endpoint of result.apiEndpoints) {
       const endpointId = `api:${endpoint.method}:${endpoint.path}`;
       if (!graph.hasNode(endpointId)) continue;
 
-      // Find the handler symbol in the same file
       const handlerSymbol = result.symbols.find((s) =>
         s.kind === 'method' || s.kind === 'function',
       );
 
       if (handlerSymbol) {
-        const handlerId = ['class', 'interface', 'struct', 'enum'].includes(handlerSymbol.kind)
+        const handlerId = ['class', 'interface', 'struct', 'enum', 'trait'].includes(handlerSymbol.kind)
           ? `component:${handlerSymbol.qualifiedName}`
           : `symbol:${handlerSymbol.qualifiedName}`;
 
@@ -245,44 +224,99 @@ function buildApiFlowRelationships(
             resolution: 'resolved',
             confidence: CONFIDENCE_MEDIUM,
           }]);
-          count++;
         }
       }
     }
   }
+}
 
-  return count;
+// ─── SQL Schema Relationships ────────────────────────────────────────────────
+
+function buildSqlSchemaRelationships(
+  graph: KnowledgeGraph,
+  parseResults: FileParseResult[],
+  generation: number,
+): void {
+  for (const result of parseResults) {
+    for (const table of result.sqlTables || []) {
+      const sourceTableId = `table:${table.tableName}`;
+      if (!graph.hasNode(sourceTableId)) continue;
+
+      for (const fk of table.foreignKeys || []) {
+        const targetTableId = `table:${fk.referencesTable}`;
+        if (graph.hasNode(targetTableId)) {
+          graph.addEdge(sourceTableId, targetTableId, 'depends-on', 'confirmed', CONFIDENCE_HIGH, [{
+            type: 'sql-query',
+            source: table.location,
+            description: `${table.tableName}.${fk.column} references ${fk.referencesTable}.${fk.referencesColumn}`,
+            resolution: 'confirmed',
+            confidence: CONFIDENCE_HIGH,
+          }]);
+        }
+      }
+    }
+  }
+}
+
+// ─── Model to Table Mapping Relationships ────────────────────────────────────
+
+function buildModelTableRelationships(
+  graph: KnowledgeGraph,
+  parseResults: FileParseResult[],
+  generation: number,
+): void {
+  const tables = graph.getNodesByType('database-table');
+  const tableNames = new Map(tables.map((t) => [t.name.toLowerCase(), t.id]));
+
+  for (const result of parseResults) {
+    for (const symbol of result.symbols) {
+      if (symbol.kind === 'class' || symbol.kind === 'struct' || symbol.kind === 'interface') {
+        const lowerName = symbol.name.toLowerCase();
+        const pluralName = `${lowerName}s`;
+
+        const matchedTableId = tableNames.get(lowerName) || tableNames.get(pluralName);
+        if (matchedTableId) {
+          const compId = `component:${symbol.qualifiedName}`;
+          if (graph.hasNode(compId)) {
+            graph.addEdge(compId, matchedTableId, 'maps-to', 'resolved', CONFIDENCE_MEDIUM, [{
+              type: 'naming-convention',
+              source: symbol.location,
+              description: `Entity ${symbol.name} maps to SQL table ${graph.getNode(matchedTableId)?.name}`,
+              resolution: 'resolved',
+              confidence: CONFIDENCE_MEDIUM,
+            }]);
+          }
+        }
+      }
+    }
+  }
 }
 
 // ─── Helper Functions ────────────────────────────────────────────────────────
 
-/**
- * Resolve an import path to an actual file path.
- */
 function resolveImportPath(
   fromFile: RelativePath,
   importSource: string,
   allResults: FileParseResult[],
 ): RelativePath | undefined {
-  // Skip external packages
   if (isExternalPackage(importSource)) return undefined;
 
   const fromDir = path.dirname(fromFile);
 
-  // Try relative resolution
   const candidates = [
     path.join(fromDir, importSource),
     path.join(fromDir, importSource + '.ts'),
     path.join(fromDir, importSource + '.tsx'),
     path.join(fromDir, importSource + '.js'),
     path.join(fromDir, importSource + '.jsx'),
+    path.join(fromDir, importSource + '.rs'),
+    path.join(fromDir, importSource + '.go'),
     path.join(fromDir, importSource, 'index.ts'),
     path.join(fromDir, importSource, 'index.js'),
-    // Remove .js extension and try .ts
+    path.join(fromDir, importSource, 'mod.rs'),
     path.join(fromDir, importSource.replace(/\.js$/, '.ts')),
   ];
 
-  // Normalize paths
   const normalizedCandidates = candidates.map((c) => path.normalize(c));
   const allPaths = new Set(allResults.map((r) => path.normalize(r.filePath)));
 
@@ -295,16 +329,10 @@ function resolveImportPath(
   return undefined;
 }
 
-/**
- * Check if an import source is an external package (not a relative path).
- */
 function isExternalPackage(source: string): boolean {
   return !source.startsWith('.') && !source.startsWith('/');
 }
 
-/**
- * Find a symbol node in a file by name.
- */
 function findSymbolInFile(
   graph: KnowledgeGraph,
   filePath: RelativePath,
@@ -322,22 +350,115 @@ function findSymbolInFile(
   return undefined;
 }
 
-/**
- * Find a type (class/interface) by name across all files.
- */
 function findTypeByName(
   graph: KnowledgeGraph,
   typeName: string,
   allResults: FileParseResult[],
 ): string | undefined {
-  // First try exact qualified name match
   const byQName = graph.getNodeByQualifiedName(typeName);
   if (byQName) return byQName.id;
 
-  // Then search all components by name
   const components = graph.getNodesByType('component');
   const match = components.find((c) => c.name === typeName);
   if (match) return match.id;
 
   return undefined;
+}
+
+// ─── Static Call Graph ───────────────────────────────────────────────────────
+
+/**
+ * Build static call graph edges from parsed call sites.
+ *
+ * For every symbol that has `callSites`, resolves each callee to a graph node
+ * and creates a typed `'calls'` edge. Resolution order:
+ *   1. Exact qualified name match in the graph
+ *   2. Exact name match across all symbols/components
+ *   3. Name match scoped to the same file first (prefer local)
+ *
+ * This activates accurate caller/callee queries, test impact propagation,
+ * and blast-radius UI — all of which require a wired call graph.
+ */
+function buildCallGraphRelationships(
+  graph: KnowledgeGraph,
+  parseResults: FileParseResult[],
+  generation: number,
+): void {
+  // Build fast name → nodeId resolution map
+  const symbolsByName = new Map<string, string[]>(); // name → [nodeId, ...]
+  const allSymbols = [...graph.getNodesByType('symbol'), ...graph.getNodesByType('component')];
+
+  for (const node of allSymbols) {
+    if (!symbolsByName.has(node.name)) {
+      symbolsByName.set(node.name, []);
+    }
+    symbolsByName.get(node.name)!.push(node.id);
+  }
+
+  let callEdgesCreated = 0;
+
+  for (const result of parseResults) {
+    for (const symbol of result.symbols) {
+      if (!symbol.callSites || symbol.callSites.length === 0) continue;
+
+      // Determine the caller node id
+      const isComponent = ['class', 'interface', 'struct', 'trait', 'impl', 'enum'].includes(symbol.kind);
+      const callerId = isComponent
+        ? `component:${symbol.qualifiedName}`
+        : `symbol:${symbol.qualifiedName}`;
+
+      if (!graph.hasNode(callerId)) continue;
+
+      for (const callSite of symbol.callSites) {
+        const callee = callSite.callee;
+
+        // 1. Try exact qualified name
+        let targetId: string | undefined;
+        const byQName = graph.getNodeByQualifiedName(callee);
+        if (byQName) {
+          targetId = byQName.id;
+        }
+
+        // 2. Try exact name match — prefer same-file nodes
+        if (!targetId) {
+          const candidates = symbolsByName.get(callee);
+          if (candidates && candidates.length > 0) {
+            // Prefer nodes from the same file
+            const sameFile = candidates.find((id) => {
+              const n = graph.getNode(id);
+              return (n?.data as { filePath?: string })?.filePath === result.filePath;
+            });
+            targetId = sameFile ?? candidates[0];
+          }
+        }
+
+        // 3. Try partial name match (for method calls like obj.method())
+        if (!targetId && callee.includes('.')) {
+          const methodName = callee.split('.').pop()!;
+          const candidates = symbolsByName.get(methodName);
+          if (candidates && candidates.length > 0) {
+            targetId = candidates[0];
+          }
+        }
+
+        if (!targetId || targetId === callerId) continue;
+
+        // Skip self-references and already-existing edges
+        try {
+          graph.addEdge(callerId, targetId, 'calls', 'resolved', CONFIDENCE_MEDIUM, [{
+            type: 'call-site',
+            source: callSite.location,
+            description: `${symbol.name} calls ${callee}`,
+            resolution: 'resolved',
+            confidence: CONFIDENCE_MEDIUM,
+          }]);
+          callEdgesCreated++;
+        } catch {
+          // Silently skip if source/target not found (race condition from incremental update)
+        }
+      }
+    }
+  }
+
+  log.info('Static call graph built', { callEdgesCreated });
 }

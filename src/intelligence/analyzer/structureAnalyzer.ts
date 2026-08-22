@@ -2,16 +2,16 @@
  * Structure Analyzer
  *
  * Detects and builds the structural hierarchy of the repository:
- * Repository → Projects → Applications/Services → Modules → Components → Files → Symbols
+ * Repository → Projects → Applications/Services → Modules → Components → Files → Symbols, Tables, Docker Services, Docs
  *
- * This populates Levels 1-7 of the knowledge graph.
+ * Populates the Knowledge Graph with full multi-language structural entities.
  */
 
 import * as path from 'path';
 import { createLogger } from '../../shared/logger.js';
 import type { RelativePath, SupportedLanguage, ArchitecturalLayer } from '../../shared/types.js';
 import type { KnowledgeGraph } from '../graph/knowledgeGraph.js';
-import { createGraphNode, type GraphNodeType } from '../graph/graphNode.js';
+import { createGraphNode } from '../graph/graphNode.js';
 import type { FileParseResult } from '../parser/treeSitterParser.js';
 import type { FileMetadata } from '../../shared/types.js';
 import { getLanguageAdapter } from '../parser/languageAdapters.js';
@@ -21,7 +21,7 @@ const log = createLogger('intelligence:analyzer:structure');
 export interface ProjectDescriptor {
   readonly path: RelativePath;
   readonly name: string;
-  readonly type: string; // 'npm', 'maven', 'gradle', 'dotnet', 'go-module', 'pip'
+  readonly type: string; // 'npm', 'maven', 'gradle', 'dotnet', 'go-module', 'pip', 'cargo'
   readonly framework?: string;
   readonly frameworkVersion?: string;
 }
@@ -58,10 +58,11 @@ const PROJECT_MARKERS: Array<{
   { file: '*.csproj', type: 'dotnet' },
   { file: '*.sln', type: 'dotnet' },
   { file: 'go.mod', type: 'go-module' },
+  { file: 'Cargo.toml', type: 'cargo' },
+  { file: 'CMakeLists.txt', type: 'cmake' },
   { file: 'requirements.txt', type: 'pip' },
   { file: 'setup.py', type: 'pip' },
   { file: 'pyproject.toml', type: 'pip' },
-  { file: 'Cargo.toml', type: 'cargo' },
 ];
 
 /**
@@ -75,12 +76,10 @@ export function detectProjects(files: FileMetadata[]): ProjectDescriptor[] {
     dirs.add(path.dirname(file.path));
   }
 
-  // Check for project markers in each directory level
   const filePaths = new Set(files.map((f) => f.path));
 
   for (const marker of PROJECT_MARKERS) {
     if (marker.file.includes('*')) {
-      // Wildcard match
       const ext = marker.file.replace('*', '');
       for (const fp of filePaths) {
         if (fp.endsWith(ext)) {
@@ -103,7 +102,6 @@ export function detectProjects(files: FileMetadata[]): ProjectDescriptor[] {
         }
       }
 
-      // Check root
       if (filePaths.has(marker.file)) {
         const existing = projects.find((p) => p.path === '.');
         if (!existing) {
@@ -122,9 +120,6 @@ export function detectProjects(files: FileMetadata[]): ProjectDescriptor[] {
 
 // ─── Layer Detection ─────────────────────────────────────────────────────────
 
-/**
- * Detect the architectural layer of a file based on its path.
- */
 export function detectLayer(filePath: RelativePath): ArchitecturalLayer {
   const lower = filePath.toLowerCase();
 
@@ -153,7 +148,7 @@ export function detectLayer(filePath: RelativePath): ArchitecturalLayer {
     return 'build';
   }
 
-  // Presentation layer (frontend)
+  // Presentation layer
   if (
     lower.includes('/ui/') ||
     lower.includes('/frontend/') ||
@@ -200,8 +195,10 @@ export function detectLayer(filePath: RelativePath): ArchitecturalLayer {
     lower.includes('/entities/') ||
     lower.includes('/database/') ||
     lower.includes('/migrations/') ||
+    lower.includes('/schema/') ||
     lower.includes('/dao/') ||
-    lower.includes('repository.')
+    lower.includes('repository.') ||
+    lower.endsWith('.sql')
   ) {
     return 'data-access';
   }
@@ -233,21 +230,14 @@ export function detectLayer(filePath: RelativePath): ArchitecturalLayer {
 
 // ─── Module Detection ────────────────────────────────────────────────────────
 
-/**
- * Detect logical modules (feature groupings) from file paths.
- */
 export function detectModules(files: FileMetadata[]): Map<string, RelativePath[]> {
   const modules = new Map<string, RelativePath[]>();
 
   for (const file of files) {
     const parts = file.path.split('/');
 
-    // Use the first 2-3 directory levels as module identifiers
-    // e.g., src/auth/* → "auth", src/features/dashboard/* → "features/dashboard"
     if (parts.length >= 2) {
       let modulePath: string;
-
-      // Skip common top-level dirs
       const topLevel = parts[0].toLowerCase();
       if (['src', 'app', 'lib', 'packages'].includes(topLevel) && parts.length >= 3) {
         modulePath = parts.slice(0, 3).join('/');
@@ -267,9 +257,6 @@ export function detectModules(files: FileMetadata[]): Map<string, RelativePath[]
 
 // ─── Graph Population ────────────────────────────────────────────────────────
 
-/**
- * Build the structural hierarchy in the knowledge graph from parse results.
- */
 export function buildStructure(
   graph: KnowledgeGraph,
   workspaceName: string,
@@ -321,7 +308,7 @@ export function buildStructure(
 
   // Level 4: Modules
   const modules = detectModules(files);
-  for (const [modulePath, moduleFiles] of modules) {
+  for (const [modulePath] of modules) {
     const moduleId = `module:${modulePath}`;
     const moduleName = modulePath.split('/').pop() || modulePath;
     const layer = detectLayer(modulePath);
@@ -333,7 +320,6 @@ export function buildStructure(
       }, generation),
     );
 
-    // Link module to parent project
     const parentProject = projects.find((p) =>
       modulePath.startsWith(p.path) || p.path === '.',
     );
@@ -367,7 +353,7 @@ export function buildStructure(
       }, generation),
     );
 
-    // Link file to parent module
+    // Link file to module
     const fileDir = path.dirname(file.path);
     for (const [modulePath] of modules) {
       if (fileDir.startsWith(modulePath) || file.path.startsWith(modulePath)) {
@@ -375,20 +361,19 @@ export function buildStructure(
         graph.addEdge(moduleId, fileId, 'contains', 'confirmed', 1.0, [{
           type: 'structural-proximity',
           source: file.path,
-          description: `File ${fileName} in module ${modulePath}`,
+          description: `File ${file.path} belongs to module ${modulePath}`,
           resolution: 'confirmed',
           confidence: 1.0,
         }]);
-        break; // Link to most specific module
+        break;
       }
     }
 
-    // Level 5 & 7: Components and Symbols
     const parseResult = parseResultMap.get(file.path);
     if (parseResult) {
+      // Symbols & Components
       for (const symbol of parseResult.symbols) {
-        // Determine if this is a component-level (class, interface) or symbol-level
-        const isComponent = ['class', 'interface', 'struct', 'enum'].includes(symbol.kind);
+        const isComponent = ['class', 'interface', 'struct', 'trait', 'impl', 'enum'].includes(symbol.kind);
         const adapter = getLanguageAdapter(file.language);
         const role = adapter?.detectArchitecturalRole(file.path, [symbol]) ?? 'unknown';
 
@@ -409,7 +394,7 @@ export function buildStructure(
           graph.addEdge(fileId, componentId, 'contains', 'confirmed', 1.0, [{
             type: 'structural-proximity',
             source: symbol.location,
-            description: `${symbol.kind} ${symbol.name} defined in ${fileName}`,
+            description: `Component ${symbol.name} is defined in ${file.path}`,
             resolution: 'confirmed',
             confidence: 1.0,
           }]);
@@ -430,14 +415,14 @@ export function buildStructure(
           graph.addEdge(fileId, symbolId, 'defined-in', 'confirmed', 1.0, [{
             type: 'structural-proximity',
             source: symbol.location,
-            description: `${symbol.kind} ${symbol.name} defined in ${fileName}`,
+            description: `Symbol ${symbol.name} is defined in ${file.path}`,
             resolution: 'confirmed',
             confidence: 1.0,
           }]);
         }
       }
 
-      // API endpoints
+      // API Endpoints
       for (const endpoint of parseResult.apiEndpoints) {
         const endpointId = `api:${endpoint.method}:${endpoint.path}`;
         graph.addNode(
@@ -457,10 +442,72 @@ export function buildStructure(
           confidence: 0.9,
         }]);
       }
+
+      // SQL Tables
+      for (const table of parseResult.sqlTables || []) {
+        const tableId = `table:${table.tableName}`;
+        graph.addNode(
+          createGraphNode('database-table', tableId, table.tableName, `table:${table.tableName}`, {
+            tableName: table.tableName,
+            filePath: table.filePath,
+            columns: table.columns,
+            foreignKeys: table.foreignKeys,
+          }, generation),
+        );
+
+        graph.addEdge(fileId, tableId, 'contains', 'confirmed', 1.0, [{
+          type: 'sql-query',
+          source: table.location,
+          description: `SQL schema table ${table.tableName}`,
+          resolution: 'confirmed',
+          confidence: 1.0,
+        }]);
+      }
+
+      // Docker Services
+      for (const dockerSvc of parseResult.dockerServices || []) {
+        const dockerId = `docker:${dockerSvc.serviceName}`;
+        graph.addNode(
+          createGraphNode('docker-service', dockerId, dockerSvc.serviceName, `docker:${dockerSvc.serviceName}`, {
+            serviceName: dockerSvc.serviceName,
+            filePath: dockerSvc.filePath,
+            image: dockerSvc.image,
+            ports: dockerSvc.ports,
+            environment: dockerSvc.environment,
+            dependsOn: dockerSvc.dependsOn,
+          }, generation),
+        );
+
+        graph.addEdge(fileId, dockerId, 'contains', 'confirmed', 1.0, [{
+          type: 'docker-binding',
+          source: dockerSvc.location,
+          description: `Container infrastructure service ${dockerSvc.serviceName}`,
+          resolution: 'confirmed',
+          confidence: 1.0,
+        }]);
+      }
+
+      // Documentation Sections
+      for (const doc of parseResult.docSections || []) {
+        const docId = `doc:${file.path}#${doc.title.toLowerCase().replace(/\s+/g, '-')}`;
+        graph.addNode(
+          createGraphNode('documentation', docId, doc.title, docId, {
+            title: doc.title,
+            filePath: doc.filePath,
+            sections: [{ heading: doc.title, level: doc.level }],
+          }, generation),
+        );
+
+        graph.addEdge(fileId, docId, 'contains', 'confirmed', 0.95, [{
+          type: 'markdown-doc',
+          source: doc.location,
+          description: `Documentation heading "${doc.title}"`,
+          resolution: 'confirmed',
+          confidence: 0.95,
+        }]);
+      }
     }
   }
 
-  log.info('Structural hierarchy built', {
-    stats: graph.getStats(),
-  });
+  log.info('Structural hierarchy built', { stats: graph.getStats() });
 }

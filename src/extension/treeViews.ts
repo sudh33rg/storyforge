@@ -50,12 +50,14 @@ export class IntelligenceTreeProvider implements vscode.TreeDataProvider<Intelli
 
     return [
       new IntelligenceTreeItem(
+        'storyforge-tree-status',
         `Status: ${status.state}`,
         vscode.TreeItemCollapsibleState.Expanded,
         'status',
-        status.state === 'ready' ? 'check' : status.state === 'scanning' ? 'sync~spin' : 'circle-outline',
+        status.state === 'ready' ? 'check' : status.state === 'scanning' || status.state === 'analyzing' || status.state === 'updating' ? 'sync~spin' : 'circle-outline',
       ),
       new IntelligenceTreeItem(
+        'storyforge-tree-graph',
         `Knowledge Graph`,
         vscode.TreeItemCollapsibleState.Collapsed,
         'graph',
@@ -69,6 +71,7 @@ export class IntelligenceTreeProvider implements vscode.TreeDataProvider<Intelli
     const items: IntelligenceTreeItem[] = [];
 
     items.push(new IntelligenceTreeItem(
+      'storyforge-status-generation',
       `Generation: ${status.generation}`,
       vscode.TreeItemCollapsibleState.None,
       'info',
@@ -76,6 +79,7 @@ export class IntelligenceTreeProvider implements vscode.TreeDataProvider<Intelli
     ));
 
     items.push(new IntelligenceTreeItem(
+      'storyforge-status-files',
       `Files: ${status.fileCount}`,
       vscode.TreeItemCollapsibleState.None,
       'info',
@@ -83,6 +87,7 @@ export class IntelligenceTreeProvider implements vscode.TreeDataProvider<Intelli
     ));
 
     items.push(new IntelligenceTreeItem(
+      'storyforge-status-nodes',
       `Nodes: ${status.graphStats.nodeCount}`,
       vscode.TreeItemCollapsibleState.None,
       'info',
@@ -90,6 +95,7 @@ export class IntelligenceTreeProvider implements vscode.TreeDataProvider<Intelli
     ));
 
     items.push(new IntelligenceTreeItem(
+      'storyforge-status-edges',
       `Edges: ${status.graphStats.edgeCount}`,
       vscode.TreeItemCollapsibleState.None,
       'info',
@@ -98,6 +104,7 @@ export class IntelligenceTreeProvider implements vscode.TreeDataProvider<Intelli
 
     if (status.lastScanDuration) {
       items.push(new IntelligenceTreeItem(
+        'storyforge-status-last-scan',
         `Last scan: ${(status.lastScanDuration / 1000).toFixed(1)}s`,
         vscode.TreeItemCollapsibleState.None,
         'info',
@@ -115,6 +122,7 @@ export class IntelligenceTreeProvider implements vscode.TreeDataProvider<Intelli
     for (const [type, count] of Object.entries(stats.nodesByType)) {
       if (count > 0) {
         const item = new IntelligenceTreeItem(
+          `storyforge-graph-type-${type}`,
           `${type} (${count})`,
           vscode.TreeItemCollapsibleState.Collapsed,
           'nodeType',
@@ -137,6 +145,7 @@ export class IntelligenceTreeProvider implements vscode.TreeDataProvider<Intelli
       const description = data.filePath || data.path || node.qualifiedName;
 
       return new IntelligenceTreeItem(
+        `storyforge-node-${node.id}`,
         node.name,
         vscode.TreeItemCollapsibleState.None,
         'node',
@@ -170,6 +179,7 @@ class IntelligenceTreeItem extends vscode.TreeItem {
   nodeType?: string;
 
   constructor(
+    id: string,
     label: string,
     collapsibleState: vscode.TreeItemCollapsibleState,
     public readonly contextValue: string,
@@ -177,6 +187,7 @@ class IntelligenceTreeItem extends vscode.TreeItem {
     description?: string,
   ) {
     super(label, collapsibleState);
+    this.id = id;
     this.iconPath = new vscode.ThemeIcon(iconId);
     this.description = description;
   }
@@ -213,6 +224,7 @@ export class WorkflowTreeProvider implements vscode.TreeDataProvider<vscode.Tree
           'No active workflows',
           vscode.TreeItemCollapsibleState.None,
         );
+        item.id = 'storyforge-workflow-empty';
         item.description = 'Use @storyforge /discover to start';
         item.iconPath = new vscode.ThemeIcon('info');
         return [item];
@@ -224,6 +236,7 @@ export class WorkflowTreeProvider implements vscode.TreeDataProvider<vscode.Tree
           title,
           vscode.TreeItemCollapsibleState.Expanded,
         );
+        item.id = `storyforge-wf-${wf.id}`;
         item.description = `Phase: ${wf.phase}`;
         item.iconPath = new vscode.ThemeIcon(wf.phase === 'story-review' ? 'verified' : 'beaker');
         (item as any).workflowId = wf.id;
@@ -246,6 +259,7 @@ export class WorkflowTreeProvider implements vscode.TreeDataProvider<vscode.Tree
           `Discovery (${wf.discoveryContext.approvalStatus})`,
           vscode.TreeItemCollapsibleState.None,
         );
+        discItem.id = `storyforge-wf-discovery-${wf.id}`;
         discItem.description = `${wf.discoveryContext.affectedAreas.length} area(s), ${(wf.discoveryContext.repositoryUnderstanding.confidence.overall * 100).toFixed(0)}% conf`;
         discItem.iconPath = new vscode.ThemeIcon('microscope');
         children.push(discItem);
@@ -257,6 +271,7 @@ export class WorkflowTreeProvider implements vscode.TreeDataProvider<vscode.Tree
           `User Stories (${wf.stories.length})`,
           vscode.TreeItemCollapsibleState.Expanded,
         );
+        storiesContainer.id = `storyforge-wf-stories-${wf.id}`;
         storiesContainer.iconPath = new vscode.ThemeIcon('bookmark');
         (storiesContainer as any).workflowId = wf.id;
         (storiesContainer as any).contextValue = 'storiesContainer';
@@ -269,6 +284,7 @@ export class WorkflowTreeProvider implements vscode.TreeDataProvider<vscode.Tree
           `QA Stories (${wf.qaStories.length})`,
           vscode.TreeItemCollapsibleState.Expanded,
         );
+        qaContainer.id = `storyforge-wf-qa-${wf.id}`;
         qaContainer.iconPath = new vscode.ThemeIcon('checklist');
         (qaContainer as any).workflowId = wf.id;
         (qaContainer as any).contextValue = 'qaContainer';
@@ -287,6 +303,7 @@ export class WorkflowTreeProvider implements vscode.TreeDataProvider<vscode.Tree
           `[${story.id}] ${story.title}`,
           vscode.TreeItemCollapsibleState.Collapsed,
         );
+        storyItem.id = `storyforge-story-${story.id}`;
         storyItem.description = `${story.storyPoints ?? 3} pts | ${story.status}`;
         storyItem.iconPath = new vscode.ThemeIcon('file-code');
         (storyItem as any).story = story;
@@ -304,6 +321,7 @@ export class WorkflowTreeProvider implements vscode.TreeDataProvider<vscode.Tree
           `${ac.id}: Given ${ac.given.slice(0, 30)}...`,
           vscode.TreeItemCollapsibleState.None,
         );
+        acItem.id = `storyforge-ac-${story.id}-${ac.id}`;
         acItem.description = `Then ${ac.then.slice(0, 30)}...`;
         acItem.iconPath = new vscode.ThemeIcon('check');
         return acItem;
@@ -319,6 +337,7 @@ export class WorkflowTreeProvider implements vscode.TreeDataProvider<vscode.Tree
           `[${qa.id}] ${qa.title}`,
           vscode.TreeItemCollapsibleState.Collapsed,
         );
+        qaItem.id = `storyforge-qa-story-${qa.id}`;
         qaItem.description = `${qa.scenarios.length} scenario(s)`;
         qaItem.iconPath = new vscode.ThemeIcon('beaker');
         (qaItem as any).qaStory = qa;
@@ -336,6 +355,7 @@ export class WorkflowTreeProvider implements vscode.TreeDataProvider<vscode.Tree
           `${sc.id}: ${sc.name}`,
           vscode.TreeItemCollapsibleState.None,
         );
+        scItem.id = `storyforge-sc-${qa.id}-${sc.id}`;
         scItem.description = `[${sc.testType}] Expect: ${sc.expectedResult.slice(0, 30)}...`;
         scItem.iconPath = new vscode.ThemeIcon('pass');
         return scItem;

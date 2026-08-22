@@ -7,6 +7,7 @@
 import * as vscode from 'vscode';
 import type { IntelligenceEngine } from '../intelligence/engine.js';
 import type { IntelligenceTreeProvider } from './treeViews.js';
+import type { WebviewController } from './webviewController.js';
 import { createLogger } from '../shared/logger.js';
 
 const log = createLogger('extension:commands');
@@ -15,6 +16,7 @@ export function registerCommands(
   context: vscode.ExtensionContext,
   engine: IntelligenceEngine,
   intelligenceTree: IntelligenceTreeProvider,
+  webviewController?: WebviewController,
 ): void {
   // Refresh Intelligence
   context.subscriptions.push(
@@ -42,13 +44,13 @@ export function registerCommands(
     }),
   );
 
-  // Show Dashboard
+  // Open / Show Dashboard
   context.subscriptions.push(
+    vscode.commands.registerCommand('storyforge.open', () => {
+      webviewController?.open();
+    }),
     vscode.commands.registerCommand('storyforge.showDashboard', () => {
-      // TODO: Open webview panel
-      vscode.window.showInformationMessage(
-        'StoryForge Dashboard will be available in a future update.',
-      );
+      webviewController?.open();
     }),
   );
 

@@ -1,12 +1,13 @@
 /**
  * Parser Tests
  *
- * Tests multi-language parsing adapters and symbol extraction.
+ * Tests multi-language parsing adapters and structural extraction across:
+ * TypeScript, JavaScript, Java, C#, Python, Go, Rust, C++, SQL, Docker, YAML, Markdown.
  */
 
 import { describe, it, expect } from 'vitest';
-import { parseFile } from '../../src/intelligence/parser/treeSitterParser';
-import { detectLanguage, getLanguageAdapter } from '../../src/intelligence/parser/languageAdapters';
+import { parseFile } from '../../src/intelligence/parser/treeSitterParser.js';
+import { detectLanguage, getLanguageAdapter } from '../../src/intelligence/parser/languageAdapters.js';
 
 describe('Language Detection', () => {
   it('should detect TypeScript', () => {
@@ -35,9 +36,25 @@ describe('Language Detection', () => {
     expect(detectLanguage('src/main.go')).toBe('go');
   });
 
-  it('should return undefined for unsupported languages', () => {
-    expect(detectLanguage('README.md')).toBeUndefined();
+  it('should detect Rust and C++', () => {
+    expect(detectLanguage('src/main.rs')).toBe('rust');
+    expect(detectLanguage('src/engine.cpp')).toBe('cpp');
+    expect(detectLanguage('include/engine.hpp')).toBe('cpp');
+  });
+
+  it('should detect SQL, Docker, YAML, Markdown', () => {
+    expect(detectLanguage('migrations/001_init.sql')).toBe('sql');
+    expect(detectLanguage('Dockerfile')).toBe('docker');
+    expect(detectLanguage('docker-compose.yml')).toBe('docker');
+    expect(detectLanguage('config/settings.yaml')).toBe('yaml');
+    expect(detectLanguage('package.json')).toBe('json');
+    expect(detectLanguage('docs/architecture.md')).toBe('markdown');
+  });
+
+  it('should return undefined for truly unsupported files', () => {
     expect(detectLanguage('Makefile')).toBeUndefined();
+    expect(detectLanguage('image.png')).toBeUndefined();
+    expect(detectLanguage('binary.exe')).toBeUndefined();
   });
 });
 
@@ -129,6 +146,120 @@ router.delete('/api/users/:id', deleteUser);
     expect(result.apiEndpoints[0].method).toBe('GET');
     expect(result.apiEndpoints[0].path).toBe('/api/users');
     expect(result.apiEndpoints[1].method).toBe('POST');
+  });
+});
+
+describe('Rust Parser', () => {
+  it('should extract structs, traits, enums, and functions', () => {
+    const code = `
+pub struct UserSession {
+    pub id: String,
+    pub active: bool,
+}
+
+pub trait Authenticator {
+    fn verify(&self, token: &str) -> bool;
+}
+
+pub enum AuthState {
+    LoggedIn,
+    LoggedOut,
+}
+
+pub async fn validate_token(token: &str) -> Result<bool, Error> {
+    Ok(true)
+}
+`;
+    const result = parseFile(code, 'src/auth.rs', 'rust');
+
+    expect(result.symbols.find((s) => s.name === 'UserSession')?.kind).toBe('struct');
+    expect(result.symbols.find((s) => s.name === 'Authenticator')?.kind).toBe('trait');
+    expect(result.symbols.find((s) => s.name === 'AuthState')?.kind).toBe('enum');
+    expect(result.symbols.find((s) => s.name === 'validate_token')?.kind).toBe('function');
+  });
+});
+
+describe('SQL Parser', () => {
+  it('should extract SQL tables, columns, and foreign keys', () => {
+    const sql = `
+CREATE TABLE users (
+    id VARCHAR(36) PRIMARY KEY,
+    email VARCHAR(255) NOT NULL,
+    created_at TIMESTAMP
+);
+
+CREATE TABLE orders (
+    id VARCHAR(36) PRIMARY KEY,
+    user_id VARCHAR(36) REFERENCES users(id),
+    total DECIMAL(10,2)
+);
+`;
+    const result = parseFile(sql, 'migrations/001_init.sql', 'sql');
+
+    expect(result.sqlTables.length).toBe(2);
+    expect(result.sqlTables[0].tableName).toBe('users');
+    expect(result.sqlTables[0].columns.length).toBe(3);
+    expect(result.sqlTables[1].tableName).toBe('orders');
+    expect(result.sqlTables[1].foreignKeys.length).toBe(1);
+    expect(result.sqlTables[1].foreignKeys[0].referencesTable).toBe('users');
+  });
+});
+
+describe('Docker & Compose Parser', () => {
+  it('should extract Dockerfile base images and ports', () => {
+    const dockerfile = `
+FROM node:20-alpine AS build
+WORKDIR /app
+COPY . .
+EXPOSE 3000
+CMD ["npm", "start"]
+`;
+    const result = parseFile(dockerfile, 'Dockerfile', 'docker');
+    expect(result.dockerServices.length).toBe(1);
+    expect(result.dockerServices[0].image).toBe('node:20-alpine');
+    expect(result.dockerServices[0].ports).toContain('3000');
+  });
+
+  it('should extract docker-compose services and dependencies', () => {
+    const compose = `
+version: '3.8'
+services:
+  web:
+    image: my-app:latest
+    ports:
+      - "8080:8080"
+    depends_on:
+      - db
+      - redis
+  db:
+    image: postgres:15
+`;
+    const result = parseFile(compose, 'docker-compose.yml', 'docker');
+    expect(result.dockerServices.length).toBe(2);
+    const webSvc = result.dockerServices.find((s) => s.serviceName === 'web');
+    expect(webSvc?.dependsOn).toContain('db');
+    expect(webSvc?.dependsOn).toContain('redis');
+  });
+});
+
+describe('Markdown Parser', () => {
+  it('should extract document sections', () => {
+    const md = `
+# System Architecture
+Overview of the system design.
+
+## Security Model
+Authentication and access control policies.
+
+### JWT Rotation
+Details on token expiration.
+`;
+    const result = parseFile(md, 'docs/architecture.md', 'markdown');
+    expect(result.docSections.length).toBe(3);
+    expect(result.docSections[0].title).toBe('System Architecture');
+    expect(result.docSections[0].level).toBe(1);
+    expect(result.docSections[1].title).toBe('Security Model');
+    expect(result.docSections[1].level).toBe(2);
   });
 });
 

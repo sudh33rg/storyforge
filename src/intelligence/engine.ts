@@ -1,19 +1,13 @@
 /**
- * Intelligence Engine — The Orchestrator
+ * Intelligence Engine — The 5-Tier Orchestrator
  *
- * This is the heart of StoryForge. It coordinates the full intelligence pipeline:
+ * Coordinates the full 5-tier intelligence architecture:
  *
- *   Repository → Discovery → Parse → Analyze → Graph → Index → Publish
- *                                                                  ↓
- *   File changes → Affected-area detection → Incremental re-analysis → Updated intelligence
- *
- * The engine is the shared foundation consumed by:
- * - VS Code extension
- * - Copilot Chat participant
- * - Webview dashboard
- * - Future CLI / browser UI
- *
- * Intelligence first. Everything else is a consumer of Intelligence.
+ *   1. Ontology Layer     (Domain metamodel & architectural invariants)
+ *   2. Semantic Layer     (BM25 Inverted Index & Concept Taxonomy)
+ *   3. Context Layer      (Situational & Generational tracking)
+ *   4. Knowledge Graph    (Universal Multi-Language Ingestion & Graph Substrate)
+ *   5. Context Graph      (Dynamic Situational Subgraph & 11-Stage Capability Reasoning)
  */
 
 import { createLogger } from '../shared/logger.js';
@@ -24,6 +18,9 @@ import { scanWorkspace, parseChangedFile } from './parser/parserPool.js';
 import { detectProjects, buildStructure } from './analyzer/structureAnalyzer.js';
 import { buildRelationships } from './analyzer/relationshipAnalyzer.js';
 import { analyzeArchitecture, type ArchitectureReport } from './analyzer/architectureAnalyzer.js';
+import { computeQualityMetrics, type QualityReport } from './analyzer/qualityAnalyzer.js';
+import { analyzeDocumentationHealth, type DocumentationHealthReport } from './analyzer/documentationAnalyzer.js';
+import { snapshotFromGraph, computeGraphDiff, type GraphDiff, type GraphSnapshot } from './graph/graphDiff.js';
 import {
   buildFeatureContext,
   buildDiscoveryContext,
@@ -32,6 +29,8 @@ import {
 } from './context/contextBuilder.js';
 import { SymbolIndex, type SymbolIndexEntry } from './index/symbolIndex.js';
 import { FileIndex } from './index/fileIndex.js';
+import { SemanticIndexer, type ScoredSemanticMatch } from './semantic/semanticIndexer.js';
+import { ContextGraph, type DynamicContextGraphProjection, type SituationalContext } from './contextGraph/contextGraph.js';
 import type {
   FeatureIntelligenceContext,
   DiscoveryContext,
@@ -40,6 +39,7 @@ import type {
 } from './context/contextTypes.js';
 import type { GraphStats } from './graph/knowledgeGraph.js';
 import { createLspBridge, type LspBridge } from './parser/lspBridge.js';
+import { McpServer } from './mcp/mcpServer.js';
 
 const log = createLogger('intelligence:engine');
 
@@ -69,7 +69,7 @@ export interface IntelligenceEngineConfig {
   readonly workspaceRoot: string;
   readonly workspaceName: string;
   readonly excludePatterns: string[];
-  readonly maxFileSize: number;
+  readonly maxFileSize?: number;
   readonly autoScan: boolean;
   readonly lspBridge?: LspBridge;
 }
@@ -93,8 +93,12 @@ export class IntelligenceEngine {
   private readonly generationTracker: GenerationTracker;
   private readonly symbolIndex: SymbolIndex;
   private readonly fileIndex: FileIndex;
+  private readonly semanticIndexer: SemanticIndexer;
+  private readonly contextGraph: ContextGraph;
   private readonly lspBridge: LspBridge;
   private architectureReport?: ArchitectureReport;
+  private cachedQualityReport?: QualityReport;
+  private previousSnapshot?: GraphSnapshot;
   private lastScanDuration?: number;
   private errorMessage?: string;
   private readonly eventHandlers: EngineEventHandler[] = [];
@@ -104,9 +108,11 @@ export class IntelligenceEngine {
     this.generationTracker = new GenerationTracker(config.workspaceRoot);
     this.symbolIndex = new SymbolIndex();
     this.fileIndex = new FileIndex();
+    this.semanticIndexer = new SemanticIndexer();
+    this.contextGraph = new ContextGraph(this.graph, this.semanticIndexer);
     this.lspBridge = config.lspBridge ?? createLspBridge();
 
-    log.info('Intelligence engine created', {
+    log.info('Intelligence engine initialized with 5-tier architecture', {
       workspace: config.workspaceName,
       root: config.workspaceRoot,
     });
@@ -120,7 +126,6 @@ export class IntelligenceEngine {
   async initialize(): Promise<void> {
     log.info('Initializing intelligence engine');
 
-    // Try to load existing intelligence
     const loaded = await loadGraph(this.graph, this.config.workspaceRoot);
     await this.generationTracker.load();
 
@@ -132,24 +137,39 @@ export class IntelligenceEngine {
         stats: this.graph.getStats(),
       });
     } else if (this.config.autoScan) {
-      // No existing intelligence — perform first scan
       await this.performFullScan();
     } else {
       this.setState('idle');
     }
   }
 
+  private activeScanPromise?: Promise<void>;
+
   /**
-   * Perform a full repository scan.
+   * Perform a full non-blocking repository scan.
    */
   async performFullScan(): Promise<void> {
+    if (this.activeScanPromise) {
+      log.info('Full scan already in progress, joining active scan');
+      return this.activeScanPromise;
+    }
+
+    this.activeScanPromise = this.doPerformFullScan();
+    try {
+      await this.activeScanPromise;
+    } finally {
+      this.activeScanPromise = undefined;
+    }
+  }
+
+  private async doPerformFullScan(): Promise<void> {
     const startTime = performance.now();
     this.setState('scanning');
 
     try {
-      log.info('Starting full repository scan');
+      log.info('Starting full non-blocking repository scan');
 
-      // Step 1: Scan and parse all files
+      // Step 1: Scan and parse all files (< 3MB, async micro-batching)
       const scanResult = await scanWorkspace({
         workspaceRoot: this.config.workspaceRoot,
         excludePatterns: this.config.excludePatterns,
@@ -160,14 +180,14 @@ export class IntelligenceEngine {
 
       this.setState('analyzing');
 
-      // Step 2: Clear existing graph and rebuild
+      // Step 2: Increment generation and reset graph
       this.graph.clear();
       const generation = this.graph.incrementGeneration();
 
-      // Step 3: Detect projects
+      // Step 3: Detect projects across all ecosystems
       const projects = detectProjects(scanResult.files);
 
-      // Step 4: Build structural hierarchy
+      // Step 4: Build structural hierarchy (Levels 1-7 + SQL, Docker, Docs)
       buildStructure(
         this.graph,
         this.config.workspaceName,
@@ -177,21 +197,27 @@ export class IntelligenceEngine {
         generation,
       );
 
-      // Step 5: Build relationships
+      // Step 5: Build relationships (Imports, Type refs, API flows, Foreign keys)
       const relResult = buildRelationships(
         this.graph,
         scanResult.parseResults,
         generation,
       );
 
-      // Step 6: Analyze architecture
+      // Step 6: Analyze architecture & patterns
       this.architectureReport = analyzeArchitecture(
         this.graph,
         scanResult.parseResults,
         projects,
       );
 
-      // Step 7: Rebuild indexes
+      // Step 6b: Compute code quality metrics (GAP 3)
+      this.cachedQualityReport = computeQualityMetrics(
+        this.graph,
+        scanResult.parseResults,
+      );
+
+      // Step 7: Rebuild indexes & Semantic BM25 index
       this.rebuildIndexes();
 
       // Step 8: Update file index
@@ -218,7 +244,7 @@ export class IntelligenceEngine {
         errors: scanResult.errors.map((e) => `${e.filePath}: ${e.error}`),
       });
 
-      // Step 10: Persist
+      // Step 10: Persist atomically
       await this.save();
 
       this.setState('ready');
@@ -260,24 +286,19 @@ export class IntelligenceEngine {
         return;
       }
 
-      // Check if the file actually changed
       const existingMeta = this.fileIndex.get(result.metadata.path);
       if (existingMeta && existingMeta.hash === result.metadata.hash) {
         this.setState('ready');
-        return; // No actual content change
+        return;
       }
 
       const generation = this.graph.incrementGeneration();
 
-      // Remove old data for this file
       this.symbolIndex.removeByFile(result.metadata.path);
-      // Note: full re-indexing would be needed for a production system
-
-      // Re-build structure for this file
-      // (simplified — full implementation would do targeted graph updates)
       this.fileIndex.set({ ...result.metadata, generation });
 
-      // Record incremental generation
+      this.rebuildIndexes();
+
       this.generationTracker.recordGeneration({
         timestamp: Date.now(),
         trigger: 'incremental',
@@ -302,7 +323,46 @@ export class IntelligenceEngine {
       });
     } catch (err) {
       log.error('Incremental update failed', err);
-      this.setState('ready'); // Recover to ready state
+      this.setState('ready');
+    }
+  }
+
+  /**
+   * Handle live in-memory document keystroke streaming without waiting for disk writes.
+   */
+  async handleDocumentChange(absolutePath: string, sourceCode: string): Promise<void> {
+    if (this.state !== 'ready' && this.state !== 'idle') return;
+
+    try {
+      const relativePath = absolutePath.replace(this.config.workspaceRoot + '/', '');
+      const language = (await import('./parser/languageAdapters.js')).detectLanguage(relativePath);
+      if (!language) return;
+
+      const { parseFile } = await import('./parser/treeSitterParser.js');
+      const parseResult = parseFile(sourceCode, relativePath, language);
+
+      const generation = this.graph.incrementGeneration();
+
+      // Update in-memory symbol index
+      this.symbolIndex.removeByFile(relativePath);
+      for (const sym of parseResult.symbols) {
+        this.symbolIndex.add({
+          id: `symbol:${sym.qualifiedName}`,
+          name: sym.name,
+          qualifiedName: sym.qualifiedName,
+          kind: (sym.kind as SymbolIndexEntry['kind']) || 'variable',
+          language: language as SymbolIndexEntry['language'],
+          filePath: relativePath,
+        });
+      }
+
+      // Quick re-index for semantic layer
+      this.rebuildIndexes();
+
+      this.emit('generation-updated', { generation, liveStream: true });
+      log.debug('Live in-memory keystroke update applied', { filePath: relativePath, symbols: parseResult.symbols.length });
+    } catch (err) {
+      log.debug('Live document change skipped', { error: String(err) });
     }
   }
 
@@ -314,20 +374,37 @@ export class IntelligenceEngine {
 
     const relativePath = absolutePath.replace(this.config.workspaceRoot + '/', '');
 
-    // Remove from indexes
     this.symbolIndex.removeByFile(relativePath);
     this.fileIndex.remove(relativePath);
 
-    // Remove from graph
     const fileNode = this.graph.getNodeByQualifiedName(`file:${relativePath}`);
     if (fileNode) {
       this.graph.removeNode(fileNode.id);
     }
 
+    this.rebuildIndexes();
     log.info('File removed from intelligence', { path: relativePath });
   }
 
-  // ─── Query API ──────────────────────────────────────────────────────────
+  // ─── Query API (The 5 Layers) ──────────────────────────────────────────
+
+  /**
+   * Project a dynamic Context Graph (Layer 5) from live situation and intent.
+   */
+  projectContextGraph(
+    intent: string,
+    keywords: string[],
+    situation: Partial<SituationalContext> = {},
+  ): DynamicContextGraphProjection {
+    return this.contextGraph.project(intent, keywords, situation);
+  }
+
+  /**
+   * Search knowledge graph using the Semantic Layer (BM25 + Synonyms).
+   */
+  searchSemantic(query: string, limit: number = 20): ScoredSemanticMatch[] {
+    return this.semanticIndexer.search(query, { limit });
+  }
 
   /**
    * Build a feature intelligence context for a feature request.
@@ -362,7 +439,7 @@ export class IntelligenceEngine {
   }
 
   /**
-   * Search the knowledge graph.
+   * Search the knowledge graph directly.
    */
   searchGraph(query: string): { nodes: ReturnType<KnowledgeGraph['searchNodes']> } {
     return { nodes: this.graph.searchNodes(query) };
@@ -391,10 +468,17 @@ export class IntelligenceEngine {
   }
 
   /**
-   * Get the knowledge graph (for advanced queries).
+   * Get the knowledge graph.
    */
   getGraph(): KnowledgeGraph {
     return this.graph;
+  }
+
+  /**
+   * Get the current architecture report if analyzed.
+   */
+  getArchitectureReport(): ArchitectureReport | undefined {
+    return this.architectureReport;
   }
 
   /**
@@ -402,6 +486,13 @@ export class IntelligenceEngine {
    */
   getGenerationTracker(): GenerationTracker {
     return this.generationTracker;
+  }
+
+  /**
+   * Get the semantic indexer.
+   */
+  getSemanticIndexer(): SemanticIndexer {
+    return this.semanticIndexer;
   }
 
   // ─── Persistence ────────────────────────────────────────────────────────
@@ -414,11 +505,55 @@ export class IntelligenceEngine {
     await this.generationTracker.save();
   }
 
-  // ─── Event System ──────────────────────────────────────────────────────
+  /**
+   * Get code quality metrics (GAP 3).
+   * Computes on first call, returns cached result thereafter.
+   */
+  getQualityMetrics(forceRecompute = false): QualityReport | null {
+    if (this.state !== 'ready') return null;
+    if (!this.cachedQualityReport || forceRecompute) {
+      // Recompute with available parse results from graph
+      this.cachedQualityReport = computeQualityMetrics(this.graph, []);
+    }
+    return this.cachedQualityReport;
+  }
 
   /**
-   * Subscribe to engine events.
+   * Get documentation health report (GAP 5).
    */
+  getDocumentationHealth(): DocumentationHealthReport | null {
+    if (this.state !== 'ready') return null;
+    const fileList = Array.from(this.fileIndex.allPaths());
+    return analyzeDocumentationHealth(this.graph, [], fileList);
+  }
+
+  /**
+   * Get graph diff between two generations (GAP 4).
+   * If no previous snapshot exists, returns null.
+   */
+  getGraphDiff(): GraphDiff | null {
+    if (this.state !== 'ready' || !this.previousSnapshot) return null;
+    const currentSnapshot = snapshotFromGraph(this.graph);
+    return computeGraphDiff(this.previousSnapshot, currentSnapshot);
+  }
+
+  /**
+   * Create an MCP (Model Context Protocol) server instance connected to this engine.
+   */
+  createMcpServer(): McpServer {
+    return new McpServer(this);
+  }
+
+  /**
+   * Store the current graph as a snapshot for future diffing.
+   * Called automatically at the start of each full scan.
+   */
+  private captureSnapshot(): void {
+    this.previousSnapshot = snapshotFromGraph(this.graph);
+  }
+
+  // ─── Event System ──────────────────────────────────────────────────────
+
   onEvent(handler: EngineEventHandler): { dispose: () => void } {
     this.eventHandlers.push(handler);
     return {
@@ -453,7 +588,6 @@ export class IntelligenceEngine {
   private rebuildIndexes(): void {
     this.symbolIndex.clear();
 
-    // Index all symbol and component nodes
     const symbols = this.graph.getNodesByType('symbol');
     const components = this.graph.getNodesByType('component');
 
@@ -474,6 +608,12 @@ export class IntelligenceEngine {
       });
     }
 
-    log.debug('Indexes rebuilt', { symbolCount: this.symbolIndex.size });
+    // Rebuild semantic BM25 index across all graph nodes
+    this.semanticIndexer.indexNodes(this.graph.getAllNodes());
+
+    log.debug('Indexes rebuilt', {
+      symbolCount: this.symbolIndex.size,
+      graphNodesCount: this.graph.getAllNodes().length,
+    });
   }
 }

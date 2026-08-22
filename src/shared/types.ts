@@ -42,7 +42,14 @@ export type SupportedLanguage =
   | 'java'
   | 'csharp'
   | 'python'
-  | 'go';
+  | 'go'
+  | 'rust'
+  | 'cpp'
+  | 'sql'
+  | 'docker'
+  | 'yaml'
+  | 'json'
+  | 'markdown';
 
 export const SUPPORTED_LANGUAGES: readonly SupportedLanguage[] = [
   'typescript',
@@ -51,6 +58,13 @@ export const SUPPORTED_LANGUAGES: readonly SupportedLanguage[] = [
   'csharp',
   'python',
   'go',
+  'rust',
+  'cpp',
+  'sql',
+  'docker',
+  'yaml',
+  'json',
+  'markdown',
 ] as const;
 
 export const LANGUAGE_EXTENSIONS: Record<SupportedLanguage, readonly string[]> = {
@@ -60,6 +74,13 @@ export const LANGUAGE_EXTENSIONS: Record<SupportedLanguage, readonly string[]> =
   csharp: ['.cs'],
   python: ['.py'],
   go: ['.go'],
+  rust: ['.rs'],
+  cpp: ['.cpp', '.cc', '.cxx', '.c', '.hpp', '.h', '.hxx'],
+  sql: ['.sql'],
+  docker: ['dockerfile', '.dockerfile', 'docker-compose.yml', 'docker-compose.yaml'],
+  yaml: ['.yaml', '.yml'],
+  json: ['.json'],
+  markdown: ['.md', '.mdx', '.markdown'],
 };
 
 // ─── Evidence & Confidence ──────────────────────────────────────────────────
@@ -96,7 +117,11 @@ export type EvidenceType =
   | 'lsp-call-hierarchy'
   | 'test-assertion'
   | 'annotation'
-  | 'decorator';
+  | 'decorator'
+  | 'sql-query'
+  | 'docker-binding'
+  | 'yaml-config'
+  | 'markdown-doc';
 
 export interface ConfidenceSummary {
   readonly overall: number;
@@ -112,6 +137,8 @@ export type SymbolKind =
   | 'class'
   | 'interface'
   | 'struct'
+  | 'trait'
+  | 'impl'
   | 'enum'
   | 'function'
   | 'method'
@@ -129,7 +156,12 @@ export type SymbolKind =
   | 'decorator'
   | 'annotation'
   | 'parameter'
-  | 'generic-type';
+  | 'generic-type'
+  | 'table'
+  | 'column'
+  | 'docker-service'
+  | 'config-item'
+  | 'doc-section';
 
 // ─── Architectural Concepts ──────────────────────────────────────────────────
 

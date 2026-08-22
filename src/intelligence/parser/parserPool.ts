@@ -1,8 +1,9 @@
 /**
  * Parser Pool
  *
- * Orchestrates file discovery, language detection, and batch parsing.
- * Acts as the entry point for the intelligence engine's parsing pipeline.
+ * Orchestrates file discovery, language detection, and non-blocking batch parsing.
+ * Supports files up to 3MB with cooperative async time-slicing (setImmediate).
+ * Acts as the entry point for the intelligence engine's ingestion pipeline.
  */
 
 import * as fs from 'fs';
@@ -15,10 +16,12 @@ import { parseFile, type FileParseResult } from './treeSitterParser.js';
 
 const log = createLogger('intelligence:parser:pool');
 
+export const MAX_INGESTION_FILE_SIZE = 3 * 1024 * 1024; // 3 MB limit for fast ingestion
+
 export interface ParserPoolOptions {
   readonly workspaceRoot: string;
   readonly excludePatterns: string[];
-  readonly maxFileSize: number;
+  readonly maxFileSize?: number;
 }
 
 export interface ScanResult {
@@ -31,14 +34,21 @@ export interface ScanResult {
   readonly durationMs: number;
 }
 
+/** Yield event loop cooperatively to prevent UI blocking */
+function yieldControl(): Promise<void> {
+  return new Promise((resolve) => setImmediate(resolve));
+}
+
 /**
- * Discover and parse all supported files in a workspace.
+ * Discover and parse all supported files in a workspace in a smooth, non-blocking flow.
  */
 export async function scanWorkspace(options: ParserPoolOptions): Promise<ScanResult> {
   const startTime = performance.now();
-  const { workspaceRoot, excludePatterns, maxFileSize } = options;
+  const workspaceRoot = options.workspaceRoot;
+  const excludePatterns = options.excludePatterns || [];
+  const maxFileSize = options.maxFileSize || MAX_INGESTION_FILE_SIZE;
 
-  log.info('Starting workspace scan', { workspaceRoot, maxFileSize });
+  log.info('Starting non-blocking workspace scan', { workspaceRoot, maxFileSize });
 
   // Step 1: Discover files
   const allFiles = await discoverFiles(workspaceRoot, excludePatterns);
@@ -57,11 +67,11 @@ export async function scanWorkspace(options: ParserPoolOptions): Promise<ScanRes
       continue;
     }
 
-    // Check file size
+    // Enforce 3MB file size limit
     try {
       const stats = await fs.promises.stat(filePath);
       if (stats.size > maxFileSize) {
-        log.debug('File skipped (too large)', { filePath: relativePath, size: stats.size });
+        log.debug('File skipped (> 3MB limit)', { filePath: relativePath, size: stats.size });
         skippedFiles++;
         continue;
       }
@@ -78,12 +88,21 @@ export async function scanWorkspace(options: ParserPoolOptions): Promise<ScanRes
     skipped: skippedFiles,
   });
 
-  // Step 3: Parse files
+  // Step 3: Parse files in non-blocking cooperative batches
   const fileMetadatas: FileMetadata[] = [];
   const parseResults: FileParseResult[] = [];
   const errors: Array<{ filePath: string; error: string }> = [];
 
-  for (const file of supportedFiles) {
+  const BATCH_SIZE = 25;
+
+  for (let i = 0; i < supportedFiles.length; i++) {
+    const file = supportedFiles[i];
+
+    // Yield control every BATCH_SIZE files to keep event loop free
+    if (i > 0 && i % BATCH_SIZE === 0) {
+      await yieldControl();
+    }
+
     try {
       const sourceCode = await fs.promises.readFile(file.absolutePath, 'utf-8');
       const hash = crypto.createHash('sha256').update(sourceCode).digest('hex').slice(0, 16);
@@ -104,7 +123,7 @@ export async function scanWorkspace(options: ParserPoolOptions): Promise<ScanRes
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : String(err);
       errors.push({ filePath: file.relativePath, error: errorMsg });
-      log.warn('Failed to parse file', { filePath: file.relativePath, error: errorMsg });
+      log.warn('Failed to parse file gracefully handled', { filePath: file.relativePath, error: errorMsg });
     }
   }
 
@@ -142,9 +161,13 @@ export async function parseChangedFile(
   if (!language) return undefined;
 
   try {
+    const stats = await fs.promises.stat(absolutePath);
+    if (stats.size > MAX_INGESTION_FILE_SIZE) {
+      return undefined;
+    }
+
     const sourceCode = await fs.promises.readFile(absolutePath, 'utf-8');
     const hash = crypto.createHash('sha256').update(sourceCode).digest('hex').slice(0, 16);
-    const stats = await fs.promises.stat(absolutePath);
 
     const result = parseFile(sourceCode, relativePath, language);
 
@@ -209,11 +232,10 @@ async function discoverFiles(
 }
 
 /**
- * Check if a path should be excluded based on glob-like patterns.
+ * Check if a path should be excluded based on patterns.
  */
 function shouldExclude(relativePath: string, name: string, patterns: string[]): boolean {
   for (const pattern of patterns) {
-    // Simple glob matching
     if (pattern.includes('**/')) {
       const suffix = pattern.replace('**/', '');
       if (suffix.endsWith('/**')) {
@@ -229,12 +251,10 @@ function shouldExclude(relativePath: string, name: string, patterns: string[]): 
       }
     }
 
-    // Direct name match
     if (name === pattern || name === pattern.replace('*', '')) {
       return true;
     }
 
-    // Hidden directories
     if (name.startsWith('.') && !name.startsWith('.storyforge')) {
       return true;
     }

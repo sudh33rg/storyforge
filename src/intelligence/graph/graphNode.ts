@@ -41,7 +41,10 @@ export type GraphNodeType =
   | 'api-endpoint'
   | 'test-suite'
   | 'configuration'
-  | 'external-dependency';
+  | 'external-dependency'
+  | 'database-table'
+  | 'docker-service'
+  | 'documentation';
 
 /** Hierarchy level for each node type (used for multi-level queries) */
 export const NODE_TYPE_LEVEL: Record<GraphNodeType, number> = {
@@ -58,6 +61,9 @@ export const NODE_TYPE_LEVEL: Record<GraphNodeType, number> = {
   'test-suite': 5,
   configuration: 6,
   'external-dependency': 4,
+  'database-table': 5,
+  'docker-service': 3,
+  documentation: 6,
 };
 
 // ─── Base Node ───────────────────────────────────────────────────────────────
@@ -84,7 +90,7 @@ export interface RepositoryNodeData {
 
 export interface ProjectNodeData {
   readonly path: RelativePath;
-  readonly projectType?: string; // 'npm', 'maven', 'gradle', 'dotnet', 'go-module', 'pip'
+  readonly projectType?: string; // 'npm', 'maven', 'gradle', 'dotnet', 'go-module', 'pip', 'cargo'
   readonly framework?: string;
   readonly frameworkVersion?: string;
 }
@@ -166,7 +172,30 @@ export interface ConfigurationNodeData {
 export interface ExternalDependencyNodeData {
   readonly packageName: string;
   readonly version?: string;
-  readonly registry?: string; // 'npm', 'maven', 'nuget', 'pypi', 'go'
+  readonly registry?: string; // 'npm', 'maven', 'nuget', 'pypi', 'go', 'cargo'
+}
+
+export interface DatabaseTableNodeData {
+  readonly tableName: string;
+  readonly filePath: RelativePath;
+  readonly columns: Array<{ name: string; type: string; isPrimary?: boolean; isNullable?: boolean }>;
+  readonly foreignKeys?: Array<{ column: string; referencesTable: string; referencesColumn: string }>;
+}
+
+export interface DockerServiceNodeData {
+  readonly serviceName: string;
+  readonly filePath: RelativePath;
+  readonly image?: string;
+  readonly buildContext?: string;
+  readonly ports?: string[];
+  readonly environment?: string[];
+  readonly dependsOn?: string[];
+}
+
+export interface DocumentationNodeData {
+  readonly title: string;
+  readonly filePath: RelativePath;
+  readonly sections: Array<{ heading: string; level: number }>;
 }
 
 // ─── Node Type Map ───────────────────────────────────────────────────────────
@@ -185,6 +214,9 @@ export type NodeDataMap = {
   'test-suite': TestSuiteNodeData;
   configuration: ConfigurationNodeData;
   'external-dependency': ExternalDependencyNodeData;
+  'database-table': DatabaseTableNodeData;
+  'docker-service': DockerServiceNodeData;
+  documentation: DocumentationNodeData;
 };
 
 // ─── Concrete Graph Node ─────────────────────────────────────────────────────

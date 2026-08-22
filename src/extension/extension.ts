@@ -17,9 +17,11 @@ import { IntelligenceTreeProvider, WorkflowTreeProvider } from './treeViews.js';
 import { VscLspBridge } from './vscLspBridge.js';
 import { VscLlmProvider } from './vscLlmProvider.js';
 import { WorkflowEngine } from '../core/workflow/workflowEngine.js';
+import { WebviewController } from './webviewController.js';
 
 let engine: IntelligenceEngine | undefined;
 let workflowEngine: WorkflowEngine | undefined;
+let webviewController: WebviewController | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
   // Set up logging
@@ -66,6 +68,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Create Workflow Engine
   workflowEngine = new WorkflowEngine(engine, llmProvider);
 
+  // Create Webview Controller
+  webviewController = new WebviewController(context, engine, workflowEngine);
+
   // Register tree view providers
   const intelligenceTree = new IntelligenceTreeProvider(engine);
   const workflowTree = new WorkflowTreeProvider(workflowEngine);
@@ -76,13 +81,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   );
 
   // Register commands
-  registerCommands(context, engine, intelligenceTree);
+  registerCommands(context, engine, intelligenceTree, webviewController);
 
   // Register Copilot Chat participant
   registerCopilotParticipant(context, engine, workflowEngine);
 
-  // Set up file watcher for incremental updates & staleness auditing
-  const fileWatcher = vscode.workspace.createFileSystemWatcher('**/*.{ts,tsx,js,jsx,java,cs,py,go}');
+  // Set up multi-language file watcher for incremental updates & staleness auditing
+  const fileWatcher = vscode.workspace.createFileSystemWatcher('**/*.{ts,tsx,js,jsx,java,cs,py,go,rs,cpp,hpp,sql,yaml,yml,json,md,dockerfile}');
 
   fileWatcher.onDidChange(async (uri) => {
     await engine?.handleFileChange(uri.fsPath);
@@ -106,6 +111,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 
   context.subscriptions.push(fileWatcher);
 
+  // Live in-memory keystroke streaming (debounced at 300ms)
+  let liveChangeTimer: NodeJS.Timeout | undefined;
+  const docWatcher = vscode.workspace.onDidChangeTextDocument((event) => {
+    if (event.document.uri.scheme !== 'file') return;
+    if (liveChangeTimer) clearTimeout(liveChangeTimer);
+
+    liveChangeTimer = setTimeout(() => {
+      engine?.handleDocumentChange(event.document.uri.fsPath, event.document.getText());
+    }, 300);
+  });
+  context.subscriptions.push(docWatcher);
+
   // Status bar item
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusBar.text = '$(beaker) StoryForge';
@@ -114,7 +131,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   statusBar.show();
   context.subscriptions.push(statusBar);
 
-  // Update status bar based on engine state
+  // Update status bar and webview based on engine state
   engine.onEvent(({ type, data }) => {
     const status = engine!.getStatus();
     switch (status.state) {
@@ -139,6 +156,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
     intelligenceTree.refresh();
     workflowTree.refresh();
+    // Push snapshot update to webview if visible
+    if (webviewController?.isVisible) {
+      webviewController.postSnapshot();
+    }
   });
 
   // Initialize the engine (will auto-scan if configured)

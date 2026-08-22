@@ -93,6 +93,13 @@ export class FileIndex {
   }
 
   /**
+   * Get all indexed file paths.
+   */
+  allPaths(): RelativePath[] {
+    return Array.from(this.files.keys());
+  }
+
+  /**
    * Clear the index.
    */
   clear(): void {

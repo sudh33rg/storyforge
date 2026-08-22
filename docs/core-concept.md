@@ -6,7 +6,14 @@
 
 ## 1. Product Identity & Definition
 
-**StoryForge** is an intelligence-first engineering system that builds and continuously maintains a deep semantic understanding of a repository (such as **LoadRunner Cloud**), then uses that understanding to collaboratively transform a user's feature request into an evidence-backed feature discovery, approved user stories, acceptance criteria, story points, and QA stories, with ValueEdge integration.
+**StoryForge** is an intelligence-first engineering system that builds and continuously maintains a deep semantic understanding of a repository, then uses that understanding to:
+
+1. **Discover** — Collaboratively analyze feature requests against the living codebase
+2. **Generate** — Produce evidence-backed user stories, QA stories, and acceptance criteria
+3. **Enrich** — Turn any raw developer prompt into a repository-aware prompt with bounded, explainable context
+4. **Customize** — Generate repository-specific Copilot instructions, skills, and agents
+5. **Trace** — Maintain end-to-end provenance from feature intent through code to ALM work items
+6. **Audit** — Detect when active stories become stale as the codebase evolves
 
 ---
 
@@ -52,7 +59,79 @@ StoryForge works by grounding every interaction in a **living semantic model** o
 
 ---
 
-## 3. Deep Semantic Understanding (Beyond Vector Search)
+## 3. The 4-Surface Architecture
+
+StoryForge Intelligence is the shared foundation. All surfaces are thin consumers:
+
+```
+                   StoryForge Intelligence
+                           ▲
+                           │
+          ┌────────────────┼────────────────┐
+          │                │                │
+ ① VS Code Sidebar   ② Webview        ③ Copilot Chat
+   (Tree Views)      (Dashboard)       (@storyforge)
+                          │
+            ┌─────────────┼─────────────┐
+            │             │             │
+    Intelligence    Feature        Prompt
+    Dashboard     Workspace      Enricher
+            │
+    Copilot Setup
+```
+
+### Surface ① — VS Code Sidebar (Tree Views)
+Browse the knowledge graph hierarchy and active workflows directly in the activity bar. Always visible for quick reference.
+
+### Surface ② — Webview Dashboard
+A full interactive React webview with 4 major areas:
+
+**Intelligence View** — The command center:
+- Workspace metrics (files indexed, symbols, relationships, entry points, tests, dependencies)
+- Graph Explorer — interactive @xyflow/react visualization with 5 modes (architecture, dependencies, calls, flows, tests-impact)
+- Query Surface — 7-mode entity query (definition, callers, callees, implementations, usages, tests, trace flow)
+- Coverage report and enrichment diagnostics
+- Entity inspector with source links
+
+**Copilot Setup** — Repository-specific Copilot customization:
+- Generate compact `.github/copilot/` artifacts from intelligence
+- Always-on repository bridge (tiny repo map)
+- Scoped language guidance (per-language conventions)
+- On-demand skills and focused agents
+- Preview, edit, select, and apply artifacts
+- Token estimation and reduction metrics
+
+**Prompt Enricher** — The most unique capability:
+- Transform raw developer prompts into repository-aware prompts
+- Task-mode selection (implementation, investigation, testing, review, general)
+- Rewrite level control (conservative, moderate, aggressive)
+- Token budget control (768 – 12,000)
+- Conversation-based iteration with follow-up turns
+- Evidence attachment with source citations
+- Bounded flow inclusion
+- Copy enriched prompt or delegate to Copilot
+
+**Feature Workspace** — The 3-stage pipeline:
+- **Stage 1 — Feature Intent**: Title, description, acceptance context, domain terms
+- **Stage 2 — Discovery**: Evidence-backed repository analysis, grouped by impact area, questions, approval
+- **Stage 3 — Stories**: User stories with Gherkin ACs, QA stories with scenarios, traceability matrix
+- Feature lifecycle history and archival
+
+### Surface ③ — Copilot Chat (@storyforge)
+Slash commands for quick interactions:
+- `/status` — Intelligence status and generation info
+- `/discover <feature>` — Start feature discovery
+- `/stories` — Generate stories from approved discovery
+- `/audit` — Audit active stories for staleness
+- `/intelligence <query>` — Search the knowledge graph
+- `/impact <component>` — Analyze change blast radius
+
+### Surface ④ — Future CLI
+The intelligence is not locked in VS Code. A future CLI can consume the same `.storyforge/` data.
+
+---
+
+## 4. Deep Semantic Understanding (Beyond Vector Search)
 
 StoryForge does not simply index text or perform vector embeddings. It understands what things are and **how they relate to each other**:
 
@@ -66,14 +145,14 @@ StoryForge does not simply index text or perform vector embeddings. It understan
 
 ---
 
-## 4. Relationship Reasoning Flow
+## 5. Relationship Reasoning Flow
 
 For any feature request, StoryForge reasons through the entire capability stack:
 
 ```
 Feature Request (e.g. "Add Load Test Scheduling")
       ↓
-Relevant LoadRunner Cloud Capability
+Relevant Capability (Domain Concept)
       ↓
 Existing UI (Pages, Dialogs, State Stores)
       ↓
@@ -98,7 +177,7 @@ StoryForge knows **why** each item in this chain is relevant.
 
 ---
 
-## 5. Evidence & Provenance
+## 6. Evidence & Provenance
 
 Every intelligence conclusion is anchored in verifiable evidence:
 
@@ -120,7 +199,7 @@ Confidence: High (0.95)
 
 ---
 
-## 6. The Knowledge Graph as a Reasoning Substrate
+## 7. The Knowledge Graph as a Reasoning Substrate
 
 The graph is not merely a visualization—it is part of the reasoning engine:
 
@@ -147,7 +226,7 @@ The graph is not merely a visualization—it is part of the reasoning engine:
 
 ---
 
-## 7. The 10-Level Understanding Hierarchy
+## 8. The 10-Level Understanding Hierarchy
 
 ```
 Level 1  — Repository
@@ -171,13 +250,48 @@ Level 9  — Execution / Data Flows
 Level 10 — Tests / Impact
 ```
 
-When asked *"Which parts of the repository would this feature affect?"*, StoryForge does not trigger a naive grep. It traverses:
-$$\text{Feature Concept} \longrightarrow \text{Related Concepts} \longrightarrow \text{Architecture} \longrightarrow \text{Dependencies} \longrightarrow \text{Execution Flows} \longrightarrow \text{Tests}$$
-and returns a compact, evidence-backed context package.
+---
+
+## 9. Specialized Context Packages (Never 500 Raw Files)
+
+StoryForge builds targeted context structures:
+
+1. **Feature Intelligence Context**: Relevant architecture, components, APIs, flows, tests, evidence, confidence scores.
+2. **Discovery Context**: Feature intent vs repository understanding, affected areas, gaps, assumptions, questions.
+3. **Story Intelligence Context**: Component/API mappings, Gherkin AC templates, QA scenario matrices.
+4. **Prompt Enrichment Context**: Token-budgeted, evidence-backed prompt with bounded flows and source citations.
+5. **Copilot Customization Context**: Compact repository bridge, scoped instructions, reusable skills.
 
 ---
 
-## 8. Continuous Learning & Generation Tracking
+## 10. Prompt Enricher — The Unique Capability
+
+The Prompt Enricher is StoryForge's most distinctive feature. It transforms any raw developer prompt into a **repository-aware prompt** that preserves intent while adding bounded, explainable context:
+
+```
+Developer prompt: "Add caching to the user service"
+         ↓
+StoryForge: "What does the repository know about UserService, caching patterns, and related tests?"
+         ↓
+Evidence: UserService.ts:L45 (service class), CacheManager.ts (existing pattern),
+          UserServiceTest.ts (8 tests), RedisConfig.ts (cache config)
+         ↓
+Enriched prompt: [Original intent preserved] + [Bounded evidence context] + [Relevant flows]
+         ↓
+Token count: 2,400 tokens (vs 180,000 tokens if full source was included)
+Reduction: 98.7% smaller than equivalent source
+```
+
+### Key Properties:
+- **Intent preservation**: The user's original wording is never altered
+- **Bounded context**: Only relevant evidence within the token budget
+- **Explainable**: Every piece of context has a reason and source location
+- **Iterable**: Conversation-based follow-up turns refine the context
+- **Task-aware**: Different task modes (implementation, investigation, testing) select different evidence strategies
+
+---
+
+## 11. Continuous Learning & Generation Tracking
 
 StoryForge does not perform a one-time static scan. It continuously learns as the repository evolves:
 
@@ -203,35 +317,7 @@ StoryForge always knows which generation it is using and audits whether active u
 
 ---
 
-## 9. Specialized Context Packages (Never 500 Raw Files)
-
-StoryForge builds three targeted context structures:
-
-1. **Feature Intelligence Context**:
-   - Relevant architecture & layers
-   - Relevant components & existing functionality
-   - Relevant APIs & execution flows
-   - Relevant dependencies & configurations
-   - Relevant existing tests
-   - Evidence & provenance
-   - Unresolved questions & confidence score
-
-2. **Discovery Context**:
-   - Feature intent & repository understanding
-   - Affected areas (direct vs indirect)
-   - Current vs proposed behavior
-   - Dependencies, risks, and assumptions
-   - Open questions & verified evidence
-
-3. **Story Intelligence Context**:
-   - Component & API mapping
-   - Acceptance criteria inputs (Given/When/Then)
-   - QA scenario inputs (positive, negative, boundary, regression)
-   - Story point estimates & technical notes
-
----
-
-## 10. Absence and Uncertainty
+## 12. Absence and Uncertainty
 
 StoryForge recognizes what is missing:
 - If a capability does not exist:
@@ -241,10 +327,10 @@ StoryForge recognizes what is missing:
 
 ---
 
-## 11. The Collaborative User Loop
+## 13. The Collaborative User Loop
 
 ```
-User: "Add X to LoadRunner Cloud."
+User: "Add X to the system."
   ↓
 Intelligence: "What does the repository currently contain relating to X?"
   ↓
@@ -273,19 +359,42 @@ ALM / ValueEdge Push
 
 ---
 
-## 12. Consumers of Intelligence
+## 14. Feature Lifecycle Management
 
-The VS Code extension, webviews, and Copilot Chat are simply **presentation surfaces**:
+Every feature workspace maintains a complete lifecycle:
 
 ```
-                 StoryForge Intelligence
-                         ▲
-                         │
-              ┌──────────┼──────────┐
-              │          │          │
-           VS Code     Browser    Future CLI
-              │
-        Developer UX
+Feature Workspace
+  ├── Feature 1 (current)
+  │   ├── Intent → Discovery (3 iterations) → Stories (2 iterations)
+  │   └── Status: In Stories phase
+  ├── Feature 2 (archived)
+  │   ├── Intent → Discovery → Stories → ValueEdge pushed
+  │   └── Status: Complete
+  └── Feature 3 (archived)
+      ├── Intent → Discovery → Rejected
+      └── Status: Abandoned
 ```
 
-The extension contains no intelligence. The browser contains no intelligence. The AI agent contains no intelligence. **StoryForge Intelligence is the shared foundation.**
+Lifecycle provides:
+- **Audit trail**: Every iteration, approval, and rejection is recorded
+- **Context continuity**: Approved context is preserved across story iterations
+- **Archival**: Completed features move to history but remain queryable
+- **Staleness detection**: Active features are audited against code changes
+
+---
+
+## 15. Zero-Infrastructure Guarantee
+
+StoryForge requires **zero external databases or cloud servers**. Everything is stored inside `.storyforge/` in the workspace root:
+
+```
+.storyforge/
+├── graph.json              # Serialized knowledge graph
+├── graph.backup.json       # Previous generation snapshot
+├── intelligence/
+│   ├── generation-summary.json  # Historical audit log
+│   └── workflow.json            # Active & archived feature workflows
+├── cache/                  # AST parse and hash cache
+└── copilot/                # Generated copilot artifacts (preview)
+```
