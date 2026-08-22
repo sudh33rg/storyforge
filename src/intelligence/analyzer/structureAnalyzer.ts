@@ -349,6 +349,9 @@ export function buildStructure(
         language: file.language,
         size: file.size,
         hash: file.hash,
+        lastModified: file.lastModified,
+        lastAnalyzed: file.lastAnalyzed,
+        symbolCount: file.symbolCount,
         layer,
       }, generation),
     );

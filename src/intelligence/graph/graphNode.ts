@@ -127,6 +127,10 @@ export interface FileNodeData {
   readonly language: SupportedLanguage;
   readonly size: number;
   readonly hash: string;
+  /** Persisted file-index metadata used to restore change detection on startup. */
+  readonly lastModified?: number;
+  readonly lastAnalyzed?: number;
+  readonly symbolCount?: number;
   readonly layer?: ArchitecturalLayer;
 }
 

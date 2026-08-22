@@ -30,5 +30,26 @@ describe('Real Workspace Scan', () => {
 
     expect(status.state).toBe('ready');
     expect(status.fileCount).toBeGreaterThan(10);
+
+    // A subsequent session must restore the in-memory file index from the
+    // persisted graph; otherwise the dashboard reports zero indexed files
+    // until the user performs another manual refresh.
+    const restoredEngine = new IntelligenceEngine({
+      workspaceRoot: root,
+      workspaceName: 'storyforge-restored',
+      excludePatterns: [
+        '**/node_modules/**',
+        '**/dist/**',
+        '**/build/**',
+        '**/.git/**',
+        '**/.storyforge/**',
+      ],
+      maxFileSize: 524288,
+      autoScan: false,
+    });
+    await restoredEngine.initialize();
+    const restoredStatus = restoredEngine.getStatus();
+    expect(restoredStatus.state).toBe('ready');
+    expect(restoredStatus.fileCount).toBe(status.fileCount);
   }, 30000);
 });

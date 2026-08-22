@@ -38,6 +38,7 @@ import type {
   CapabilityChain,
 } from './context/contextTypes.js';
 import type { GraphStats } from './graph/knowledgeGraph.js';
+import type { FileMetadata, SupportedLanguage } from '../shared/types.js';
 import { createLspBridge, type LspBridge } from './parser/lspBridge.js';
 import { McpServer } from './mcp/mcpServer.js';
 
@@ -130,6 +131,10 @@ export class IntelligenceEngine {
     await this.generationTracker.load();
 
     if (loaded) {
+      // The graph is persisted, while FileIndex is intentionally in-memory.
+      // Rehydrate it before exposing the ready state so a restored workspace
+      // cannot report zero indexed files or treat every file as new.
+      this.rebuildFileIndex();
       this.rebuildIndexes();
       this.setState('ready');
       log.info('Intelligence loaded from disk', {
@@ -615,5 +620,46 @@ export class IntelligenceEngine {
       symbolCount: this.symbolIndex.size,
       graphNodesCount: this.graph.getAllNodes().length,
     });
+  }
+
+  /** Restore the change-detection index from persisted file nodes. */
+  private rebuildFileIndex(): void {
+    this.fileIndex.clear();
+
+    const symbolCounts = new Map<string, number>();
+    for (const symbol of this.graph.getNodesByType('symbol')) {
+      const filePath = (symbol.data as { filePath?: string }).filePath;
+      if (filePath) symbolCounts.set(filePath, (symbolCounts.get(filePath) ?? 0) + 1);
+    }
+
+    for (const node of this.graph.getNodesByType('file')) {
+      const data = node.data as {
+        path?: string;
+        language?: string;
+        size?: number;
+        hash?: string;
+        lastModified?: number;
+        lastAnalyzed?: number;
+        symbolCount?: number;
+      };
+
+      if (!data.path || !data.language || !data.hash) continue;
+
+      const metadata: FileMetadata = {
+        path: data.path,
+        language: data.language as SupportedLanguage,
+        size: data.size ?? 0,
+        hash: data.hash,
+        // Older graph stores do not have these fields. Hash-based change
+        // detection remains valid, so use safe defaults for those versions.
+        lastModified: data.lastModified ?? 0,
+        lastAnalyzed: data.lastAnalyzed ?? 0,
+        generation: node.generationUpdated,
+        symbolCount: data.symbolCount ?? symbolCounts.get(data.path) ?? 0,
+      };
+      this.fileIndex.set(metadata);
+    }
+
+    log.debug('File index restored from graph', { fileCount: this.fileIndex.size });
   }
 }
