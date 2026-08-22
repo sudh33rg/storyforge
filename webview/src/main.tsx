@@ -38,6 +38,7 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     const listener = (event: MessageEvent<ExtensionEvent>): void => {
+      if (!event.data || typeof event.data !== 'object') return;
       if (event.data.type === 'app/snapshot') setSnapshot(event.data.snapshot);
       if (event.data.type === 'app/error' || event.data.type === 'app/notice') setMessage(event.data.message);
     };

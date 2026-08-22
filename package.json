@@ -21,7 +21,15 @@
     "copilot"
   ],
   "activationEvents": [
-    "onStartupFinished"
+    "onStartupFinished",
+    "onCommand:storyforge.open",
+    "onCommand:storyforge.showDashboard",
+    "onCommand:storyforge.refreshIntelligence",
+    "onCommand:storyforge.showStatus",
+    "onCommand:storyforge.startDiscovery",
+    "onCommand:storyforge.analyzeImpact",
+    "onView:storyforge.intelligence",
+    "onView:storyforge.workflow"
   ],
   "main": "./dist/extension.js",
   "contributes": {
@@ -29,7 +37,7 @@
       {
         "command": "storyforge.open",
         "title": "StoryForge: Open Dashboard",
-        "icon": "$(window)"
+        "icon": "$(dashboard)"
       },
       {
         "command": "storyforge.refreshIntelligence",
@@ -54,6 +62,20 @@
         "title": "StoryForge: Analyze Impact"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "storyforge.open",
+          "when": "view == storyforge.intelligence || view == storyforge.workflow",
+          "group": "navigation@1"
+        },
+        {
+          "command": "storyforge.refreshIntelligence",
+          "when": "view == storyforge.intelligence",
+          "group": "navigation@2"
+        }
+      ]
+    },
     "viewsContainers": {
       "activitybar": [
         {

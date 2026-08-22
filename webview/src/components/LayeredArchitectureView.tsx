@@ -10,6 +10,7 @@ export function LayeredArchitectureView({ status }: { status: IntelligenceStatus
 
   useEffect(() => {
     const handler = (event: MessageEvent<ExtensionEvent>): void => {
+      if (!event.data || typeof event.data !== 'object') return;
       if (event.data.type === 'semantic/search-response') {
         setSearchResults(event.data.results);
         setSearchLoading(false);

@@ -54,9 +54,7 @@ export class WebviewController {
     private readonly workflowEngine?: WorkflowEngine,
   ) {
     this.engine.onEvent(() => {
-      if (this.isVisible) {
-        this.postSnapshot();
-      }
+      this.postSnapshot();
     });
   }
 
@@ -64,48 +62,59 @@ export class WebviewController {
    * Open or reveal the StoryForge webview panel.
    */
   open(): void {
-    if (this.panel) {
-      this.panel.reveal(vscode.ViewColumn.One);
-      return;
+    try {
+      if (this.panel) {
+        this.panel.reveal(vscode.ViewColumn.One);
+        return;
+      }
+
+      this.panel = vscode.window.createWebviewPanel(
+        'storyforge.dashboard',
+        'StoryForge',
+        vscode.ViewColumn.One,
+        {
+          enableScripts: true,
+          retainContextWhenHidden: true,
+          localResourceRoots: [
+            vscode.Uri.joinPath(this.context.extensionUri, 'dist'),
+          ],
+        },
+      );
+
+      this.panel.webview.html = this.getHtml(this.panel.webview);
+
+      // Handle messages from the webview
+      this.panel.webview.onDidReceiveMessage(
+        (msg: WebviewRequest) => this.handleMessage(msg),
+        undefined,
+        this.context.subscriptions,
+      );
+
+      // Clean up on dispose
+      this.panel.onDidDispose(() => {
+        this.panel = undefined;
+      }, undefined, this.context.subscriptions);
+
+      // Send initial snapshot
+      this.postSnapshot();
+      log.info('Webview panel opened');
+    } catch (err) {
+      log.error('Failed to open webview panel', err);
+      vscode.window.showErrorMessage(
+        `StoryForge: Failed to open dashboard — ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
-
-    this.panel = vscode.window.createWebviewPanel(
-      'storyforge.dashboard',
-      'StoryForge',
-      vscode.ViewColumn.One,
-      {
-        enableScripts: true,
-        retainContextWhenHidden: true,
-        localResourceRoots: [
-          vscode.Uri.joinPath(this.context.extensionUri, 'dist'),
-        ],
-      },
-    );
-
-    this.panel.webview.html = this.getHtml(this.panel.webview);
-
-    // Handle messages from the webview
-    this.panel.webview.onDidReceiveMessage(
-      (msg: WebviewRequest) => this.handleMessage(msg),
-      undefined,
-      this.context.subscriptions,
-    );
-
-    // Clean up on dispose
-    this.panel.onDidDispose(() => {
-      this.panel = undefined;
-    }, undefined, this.context.subscriptions);
-
-    // Send initial snapshot
-    this.postSnapshot();
-    log.info('Webview panel opened');
   }
 
   /**
    * Post the current app snapshot to the webview.
    */
   postSnapshot(): void {
-    this.post({ type: 'app/snapshot', snapshot: this.buildSnapshot() });
+    try {
+      this.post({ type: 'app/snapshot', snapshot: this.buildSnapshot() });
+    } catch (err) {
+      log.error('Failed to build/post snapshot', err);
+    }
   }
 
   /**
@@ -943,7 +952,7 @@ export class WebviewController {
 </head>
 <body>
   <div id="root"></div>
-  <script nonce="${nonce}" type="module" src="${scriptUri}"></script>
+  <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;
   }

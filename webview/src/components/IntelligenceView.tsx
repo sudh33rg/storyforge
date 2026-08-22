@@ -104,13 +104,23 @@ export function IntelligenceView({ status }: { status: IntelligenceStatus }): Re
   const percent = progress?.total ? Math.round(progress.completed / progress.total * 100) : 0;
 
   useEffect(() => {
-    if (status.state === 'fresh' || status.state === 'failed') {
+    if (status.state !== 'indexing') {
       setIsRefreshing(false);
     }
   }, [status.state]);
 
   useEffect(() => {
+    if (isRefreshing) {
+      const timer = setTimeout(() => {
+        setIsRefreshing(false);
+      }, 8000);
+      return () => clearTimeout(timer);
+    }
+  }, [isRefreshing]);
+
+  useEffect(() => {
     const handler = (event: MessageEvent<ExtensionEvent>): void => {
+      if (!event.data || typeof event.data !== 'object') return;
       if (event.data.type === 'graph/response') {
         setGraphData(event.data.response);
         setGraphLoading(false);

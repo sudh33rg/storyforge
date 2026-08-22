@@ -61,6 +61,7 @@ export function CodeQualityView(): React.JSX.Element {
 
   useEffect(() => {
     const handler = (event: MessageEvent) => {
+      if (!event.data || typeof event.data !== 'object') return;
       if (event.data.type === 'intelligence/quality-metrics-response') {
         setReport(event.data.report);
         setLoading(false);

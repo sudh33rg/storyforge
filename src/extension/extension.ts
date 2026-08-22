@@ -32,7 +32,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Get workspace root
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
   if (!workspaceFolder) {
-    outputChannel.appendLine('No workspace folder found. StoryForge requires an open workspace.');
+    outputChannel.appendLine('No workspace folder found. Registering fallback commands.');
+    context.subscriptions.push(
+      vscode.commands.registerCommand('storyforge.open', () => {
+        vscode.window.showWarningMessage('StoryForge requires an open workspace folder. Please open a folder/repository in VS Code first.');
+      }),
+      vscode.commands.registerCommand('storyforge.showDashboard', () => {
+        vscode.window.showWarningMessage('StoryForge requires an open workspace folder. Please open a folder/repository in VS Code first.');
+      }),
+      vscode.commands.registerCommand('storyforge.showStatus', () => {
+        vscode.window.showWarningMessage('StoryForge requires an open workspace folder.');
+      }),
+      vscode.commands.registerCommand('storyforge.refreshIntelligence', () => {
+        vscode.window.showWarningMessage('StoryForge requires an open workspace folder.');
+      }),
+    );
     return;
   }
 
@@ -126,8 +140,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   // Status bar item
   const statusBar = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 100);
   statusBar.text = '$(beaker) StoryForge';
-  statusBar.tooltip = 'StoryForge Intelligence';
-  statusBar.command = 'storyforge.showStatus';
+  statusBar.tooltip = 'Click to open StoryForge Dashboard';
+  statusBar.command = 'storyforge.open';
   statusBar.show();
   context.subscriptions.push(statusBar);
 
@@ -162,15 +176,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
 
-  // Initialize the engine (will auto-scan if configured)
-  outputChannel.appendLine('Initializing intelligence engine...');
-  try {
-    await engine.initialize();
-    outputChannel.appendLine(`Intelligence ready. Generation: ${engine.getStatus().generation}`);
-  } catch (err) {
+  // Initialize the engine in the background so commands and dashboard can open immediately
+  outputChannel.appendLine('Initializing intelligence engine in background...');
+  engine.initialize().then(() => {
+    outputChannel.appendLine(`Intelligence ready. Generation: ${engine!.getStatus().generation}`);
+  }).catch((err) => {
     outputChannel.appendLine(`Intelligence initialization failed: ${err}`);
     vscode.window.showErrorMessage(`StoryForge intelligence initialization failed: ${err}`);
-  }
+  });
 
   outputChannel.appendLine('StoryForge activated.');
 }

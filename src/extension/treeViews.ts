@@ -48,7 +48,21 @@ export class IntelligenceTreeProvider implements vscode.TreeDataProvider<Intelli
   private getRootItems(): IntelligenceTreeItem[] {
     const status = this.engine.getStatus();
 
+    const openDashboardItem = new IntelligenceTreeItem(
+      'storyforge-tree-open-dashboard',
+      'Open Dashboard',
+      vscode.TreeItemCollapsibleState.None,
+      'action',
+      'dashboard',
+      'Launch Webview',
+    );
+    openDashboardItem.command = {
+      command: 'storyforge.open',
+      title: 'StoryForge: Open Dashboard',
+    };
+
     return [
+      openDashboardItem,
       new IntelligenceTreeItem(
         'storyforge-tree-status',
         `Status: ${status.state}`,

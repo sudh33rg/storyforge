@@ -8,6 +8,11 @@
 export const Uri = {
   file: (path: string) => ({ fsPath: path, path, scheme: 'file' }),
   parse: (value: string) => ({ fsPath: value, path: value, scheme: 'file' }),
+  joinPath: (base: { fsPath: string; path: string }, ...paths: string[]) => ({
+    fsPath: `${base.fsPath}/${paths.join('/')}`,
+    path: `${base.path}/${paths.join('/')}`,
+    scheme: 'vscode-resource',
+  }),
 };
 
 export const TreeItemCollapsibleState = {
@@ -15,6 +20,20 @@ export const TreeItemCollapsibleState = {
   Collapsed: 1,
   Expanded: 2,
 };
+
+export enum ViewColumn {
+  Active = -1,
+  Beside = -2,
+  One = 1,
+  Two = 2,
+  Three = 3,
+  Four = 4,
+  Five = 5,
+  Six = 6,
+  Seven = 7,
+  Eight = 8,
+  Nine = 9,
+}
 
 export class TreeItem {
   label?: string;
@@ -103,6 +122,22 @@ export const window = {
     dispose: () => {},
   }),
   registerTreeDataProvider: () => ({ dispose: () => {} }),
+  createWebviewPanel: (_viewType: string, _title: string, _showOptions: any, _options: any) => ({
+    webview: {
+      html: '',
+      postMessage: async () => true,
+      onDidReceiveMessage: () => ({ dispose: () => {} }),
+      asWebviewUri: (uri: any) => ({
+        ...uri,
+        toString: () => uri.fsPath || uri.path || 'vscode-resource:/test',
+      }),
+      cspSource: 'vscode-webview:',
+    },
+    reveal: () => {},
+    onDidDispose: () => ({ dispose: () => {} }),
+    dispose: () => {},
+    visible: true,
+  }),
   withProgress: async (_: unknown, fn: () => Promise<unknown>) => fn(),
 };
 
@@ -150,6 +185,7 @@ export default {
   Uri,
   TreeItem,
   TreeItemCollapsibleState,
+  ViewColumn,
   ThemeIcon,
   Position,
   Range,

@@ -128,6 +128,7 @@ export function GraphDiffView(): React.JSX.Element {
 
   useEffect(() => {
     const handler = (event: MessageEvent) => {
+      if (!event.data || typeof event.data !== 'object') return;
       if (event.data.type === 'graph/diff-response') {
         const d: GraphDiffDto | null = event.data.diff;
         if (d) {

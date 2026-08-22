@@ -15,6 +15,7 @@ export function CopilotView(): React.JSX.Element {
 
   useEffect(() => {
     const handler = (event: MessageEvent<ExtensionEvent>): void => {
+      if (!event.data || typeof event.data !== 'object') return;
       if (event.data.type === 'copilot/response') {
         setPack(event.data.pack);
         setArtifacts(event.data.pack.artifacts);

@@ -100,6 +100,7 @@ export function ImpactBlastRadiusView({ onSearchNode }: ImpactBlastRadiusViewPro
   // Listen for impact response
   React.useEffect(() => {
     const handler = (event: MessageEvent) => {
+      if (!event.data || typeof event.data !== 'object') return;
       if (event.data.type === 'graph/impact-response') {
         setResult(event.data.result);
         setLoading(false);

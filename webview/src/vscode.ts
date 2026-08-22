@@ -13,9 +13,28 @@ interface VsCodeApi {
   setState(state: unknown): void;
 }
 
-// @ts-expect-error acquireVsCodeApi is injected by the VS Code webview host
-export const vscode: VsCodeApi = typeof acquireVsCodeApi === 'function' ? acquireVsCodeApi() : {
-  postMessage: (msg: WebviewRequest) => console.log('[mock] postMessage', msg),
-  getState: () => null,
-  setState: () => {},
-};
+// Global declaration for VS Code Webview host injection
+declare function acquireVsCodeApi(): VsCodeApi;
+
+function getVsCodeApi(): VsCodeApi {
+  try {
+    if (typeof acquireVsCodeApi === 'function') {
+      return acquireVsCodeApi();
+    }
+  } catch {}
+
+  try {
+    if (typeof window !== 'undefined' && typeof (window as any).acquireVsCodeApi === 'function') {
+      return (window as any).acquireVsCodeApi();
+    }
+  } catch {}
+
+  return {
+    postMessage: (msg: WebviewRequest) => console.log('[mock] postMessage', msg),
+    getState: () => null,
+    setState: () => {},
+  };
+}
+
+export const vscode: VsCodeApi = getVsCodeApi();
+

@@ -25,7 +25,7 @@ const webviewConfig = {
   entryPoints: ['webview/src/main.tsx'],
   bundle: true,
   outfile: 'dist/webview.js',
-  format: 'esm',
+  format: 'iife',
   platform: 'browser',
   target: 'es2020',
   sourcemap: true,
