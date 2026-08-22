@@ -1,0 +1,201 @@
+{
+  "name": "storyforge",
+  "displayName": "StoryForge",
+  "description": "Intelligence-first engineering system that builds deep semantic understanding of repositories and transforms feature requests into evidence-backed stories.",
+  "version": "0.1.0",
+  "publisher": "storyforge",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.95.0"
+  },
+  "categories": [
+    "Other",
+    "Machine Learning",
+    "Programming Languages"
+  ],
+  "keywords": [
+    "intelligence",
+    "stories",
+    "discovery",
+    "repository analysis",
+    "copilot"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "storyforge.refreshIntelligence",
+        "title": "StoryForge: Refresh Intelligence",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "storyforge.showDashboard",
+        "title": "StoryForge: Show Dashboard",
+        "icon": "$(dashboard)"
+      },
+      {
+        "command": "storyforge.showStatus",
+        "title": "StoryForge: Show Intelligence Status"
+      },
+      {
+        "command": "storyforge.startDiscovery",
+        "title": "StoryForge: Start Feature Discovery"
+      },
+      {
+        "command": "storyforge.analyzeImpact",
+        "title": "StoryForge: Analyze Impact"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "storyforge",
+          "title": "StoryForge",
+          "icon": "$(beaker)"
+        }
+      ]
+    },
+    "views": {
+      "storyforge": [
+        {
+          "id": "storyforge.intelligence",
+          "name": "Intelligence"
+        },
+        {
+          "id": "storyforge.workflow",
+          "name": "Workflow"
+        }
+      ]
+    },
+    "chatParticipants": [
+      {
+        "id": "storyforge.participant",
+        "fullName": "StoryForge",
+        "name": "storyforge",
+        "description": "Intelligence-first feature discovery and story engineering",
+        "isSticky": true,
+        "commands": [
+          {
+            "name": "discover",
+            "description": "Start feature discovery for a feature request"
+          },
+          {
+            "name": "stories",
+            "description": "Generate user stories and QA stories from approved discovery"
+          },
+          {
+            "name": "audit",
+            "description": "Audit active stories for generational code staleness"
+          },
+          {
+            "name": "intelligence",
+            "description": "Query the repository knowledge graph"
+          },
+          {
+            "name": "impact",
+            "description": "Analyze the impact of a proposed change"
+          },
+          {
+            "name": "status",
+            "description": "Show intelligence engine status and generation info"
+          }
+        ]
+      }
+    ],
+    "configuration": {
+      "title": "StoryForge",
+      "properties": {
+        "storyforge.intelligence.autoScan": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically scan the repository when the workspace opens."
+        },
+        "storyforge.intelligence.excludePatterns": {
+          "type": "array",
+          "default": [
+            "**/node_modules/**",
+            "**/dist/**",
+            "**/build/**",
+            "**/.git/**",
+            "**/vendor/**",
+            "**/target/**",
+            "**/__pycache__/**",
+            "**/.storyforge/**"
+          ],
+          "description": "Glob patterns for files/directories to exclude from intelligence scanning."
+        },
+        "storyforge.intelligence.maxFileSize": {
+          "type": "number",
+          "default": 524288,
+          "description": "Maximum file size in bytes to analyze (default: 512KB)."
+        },
+        "storyforge.alm.provider": {
+          "type": "string",
+          "enum": [
+            "none",
+            "valueedge",
+            "github",
+            "jira"
+          ],
+          "default": "none",
+          "description": "ALM provider for story integration."
+        },
+        "storyforge.alm.valueedge.url": {
+          "type": "string",
+          "default": "",
+          "description": "ValueEdge server URL."
+        },
+        "storyforge.alm.valueedge.sharedSpace": {
+          "type": "string",
+          "default": "",
+          "description": "ValueEdge shared space ID."
+        },
+        "storyforge.alm.valueedge.workspace": {
+          "type": "string",
+          "default": "",
+          "description": "ValueEdge workspace ID."
+        },
+        "storyforge.alm.github.repository": {
+          "type": "string",
+          "default": "",
+          "description": "GitHub repository (owner/repo) for issue integration."
+        },
+        "storyforge.alm.jira.url": {
+          "type": "string",
+          "default": "",
+          "description": "Jira Cloud URL."
+        },
+        "storyforge.alm.jira.projectKey": {
+          "type": "string",
+          "default": "",
+          "description": "Jira project key for story creation."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "npm run build:extension && npm run build:webview",
+    "build:extension": "node esbuild.config.mjs",
+    "build:webview": "cd webview && npx vite build",
+    "watch": "node esbuild.config.mjs --watch",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "check": "tsc --noEmit && vitest run",
+    "package": "npx @vscode/vsce package --no-dependencies",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "web-tree-sitter": "^0.24.7"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/vscode": "^1.95.0",
+    "@vscode/vsce": "^3.2.0",
+    "esbuild": "^0.24.2",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

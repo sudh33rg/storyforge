@@ -1,0 +1,7 @@
+node_modules/
+dist/
+.storyforge/
+*.vsix
+.DS_Store
+webview/dist/
+coverage/

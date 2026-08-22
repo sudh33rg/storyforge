@@ -1,0 +1,12 @@
+.vscode/**
+.vscode-test/**
+src/**
+webview/src/**
+tests/**
+.gitignore
+tsconfig.json
+vitest.config.ts
+esbuild.config.mjs
+.storyforge/**
+coverage/**
+**/*.map
