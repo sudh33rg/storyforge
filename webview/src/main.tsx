@@ -32,8 +32,16 @@ const initialSnapshot: AppSnapshot = {
   storyGeneration: null,
 };
 
+declare global {
+  interface Window {
+    __STORYFORGE_INITIAL_SNAPSHOT__?: AppSnapshot;
+  }
+}
+
 export function App(): React.JSX.Element {
-  const [snapshot, setSnapshot] = useState<AppSnapshot>(initialSnapshot);
+  const [snapshot, setSnapshot] = useState<AppSnapshot>(
+    () => window.__STORYFORGE_INITIAL_SNAPSHOT__ ?? initialSnapshot,
+  );
   const [message, setMessage] = useState<string | null>(null);
 
   useEffect(() => {
@@ -43,8 +51,20 @@ export function App(): React.JSX.Element {
       if (event.data.type === 'app/error' || event.data.type === 'app/notice') setMessage(event.data.message);
     };
     window.addEventListener('message', listener);
+
+    // The extension can begin scanning before the webview renderer has
+    // finished attaching its message listener. Re-request the snapshot a few
+    // times during startup so the default "Create Intelligence" screen cannot
+    // mask an already-running scan.
     vscode.postMessage({ type: 'app/ready' });
-    return () => window.removeEventListener('message', listener);
+    const readyRetries = [50, 200, 500].map((delay) => window.setTimeout(() => {
+      vscode.postMessage({ type: 'app/ready' });
+    }, delay));
+
+    return () => {
+      window.removeEventListener('message', listener);
+      readyRetries.forEach((timer) => window.clearTimeout(timer));
+    };
   }, []);
 
   const navigate = (view: ViewName): void => vscode.postMessage({ type: 'navigation/open', view });

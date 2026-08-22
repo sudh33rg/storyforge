@@ -176,14 +176,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     }
   });
 
-  // Initialize the engine in the background so commands and dashboard can open immediately
-  outputChannel.appendLine('Initializing intelligence engine in background...');
-  engine.initialize().then(() => {
-    outputChannel.appendLine(`Intelligence ready. Generation: ${engine!.getStatus().generation}`);
-  }).catch((err) => {
-    outputChannel.appendLine(`Intelligence initialization failed: ${err}`);
-    vscode.window.showErrorMessage(`StoryForge intelligence initialization failed: ${err}`);
-  });
+  // Defer initialization one event-loop turn so the activation promise resolves
+  // and dashboard commands can create their panel before disk loading/scanning
+  // begins. The scan remains fully asynchronous and updates the visible panel
+  // through the engine event stream.
+  outputChannel.appendLine('Scheduling background intelligence initialization...');
+  setTimeout(() => {
+    outputChannel.appendLine('Initializing intelligence engine in background...');
+    void engine!.initialize().then(() => {
+      outputChannel.appendLine(`Intelligence ready. Generation: ${engine!.getStatus().generation}`);
+    }).catch((err) => {
+      outputChannel.appendLine(`Intelligence initialization failed: ${err}`);
+      vscode.window.showErrorMessage(`StoryForge intelligence initialization failed: ${err}`);
+    });
+  }, 500);
 
   outputChannel.appendLine('StoryForge activated.');
 }

@@ -68,6 +68,10 @@ export class StorageEngine {
       for (let i = 0; i < nodes.length; i++) {
         if (i > 0) gzip.write(',');
         gzip.write(JSON.stringify(nodes[i]));
+        // A large repository can contain hundreds of thousands of nodes.
+        // Yield periodically so the VS Code extension host can keep servicing
+        // the dashboard while persistence is in progress.
+        if ((i + 1) % 1000 === 0) await yieldToEventLoop();
       }
 
       gzip.write('],"edges":[');
@@ -76,6 +80,7 @@ export class StorageEngine {
       for (let i = 0; i < edges.length; i++) {
         if (i > 0) gzip.write(',');
         gzip.write(JSON.stringify(edges[i]));
+        if ((i + 1) % 1000 === 0) await yieldToEventLoop();
       }
 
       gzip.write(']}');
@@ -213,4 +218,8 @@ export class StorageEngine {
       generation: gStats.generation,
     };
   }
+}
+
+function yieldToEventLoop(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
 }

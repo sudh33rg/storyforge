@@ -90,6 +90,12 @@ export class WebviewController {
         this.context.subscriptions,
       );
 
+      // A panel can become visible before the webview renderer has completed
+      // its initial handshake. Push the latest state on visibility changes so
+      // a scan in progress is rendered as progress instead of the webview's
+      // default unavailable state.
+      this.panel.onDidChangeViewState?.(() => this.postSnapshot());
+
       // Clean up on dispose
       this.panel.onDidDispose(() => {
         this.panel = undefined;
@@ -97,6 +103,9 @@ export class WebviewController {
 
       // Send initial snapshot
       this.postSnapshot();
+      // Give the renderer a second chance to receive the current state after
+      // its document and scripts have settled.
+      setTimeout(() => this.postSnapshot(), 100);
       log.info('Webview panel opened');
     } catch (err) {
       log.error('Failed to open webview panel', err);
@@ -934,6 +943,15 @@ export class WebviewController {
 
   private getHtml(webview: vscode.Webview): string {
     const nonce = getNonce();
+    // Embed the state that was observed while creating the panel. The message
+    // channel is asynchronous and the extension host can be busy analysing a
+    // large workspace before it can answer the renderer's `app/ready` request.
+    // Without this bootstrap, React briefly (or permanently) renders its
+    // fallback "Create Intelligence" screen over an active scan.
+    const initialSnapshot = JSON.stringify(this.buildSnapshot())
+      .replace(/</g, '\\u003c')
+      .replace(/>/g, '\\u003e')
+      .replace(/&/g, '\\u0026');
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js'),
     );
@@ -952,6 +970,7 @@ export class WebviewController {
 </head>
 <body>
   <div id="root"></div>
+  <script nonce="${nonce}">window.__STORYFORGE_INITIAL_SNAPSHOT__=${initialSnapshot};</script>
   <script nonce="${nonce}" src="${scriptUri}"></script>
 </body>
 </html>`;

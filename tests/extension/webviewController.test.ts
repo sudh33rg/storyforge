@@ -59,6 +59,7 @@ describe('WebviewController Extension Integration', () => {
 
     expect(createdPanel.webview.html).toContain('<!DOCTYPE html>');
     expect(createdPanel.webview.html).toContain('<div id="root"></div>');
+    expect(createdPanel.webview.html).toContain('__STORYFORGE_INITIAL_SNAPSHOT__');
     expect(createdPanel.webview.html).toContain('webview.js');
     expect(createdPanel.webview.html).toContain('webview.css');
   });
@@ -85,5 +86,25 @@ describe('WebviewController Extension Integration', () => {
         }),
       }),
     );
+  });
+
+  it('should expose indexing state immediately when auto-scan is active', () => {
+    const scanningEngine = new IntelligenceEngine({
+      workspaceRoot: '/test',
+      workspaceName: 'test-workspace',
+      autoScan: true,
+    });
+    const controller = new WebviewController(context, scanningEngine);
+    controller.open();
+
+    expect(createdPanel.webview.postMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'app/snapshot',
+        snapshot: expect.objectContaining({
+          intelligence: expect.objectContaining({ state: 'indexing' }),
+        }),
+      }),
+    );
+    expect(createdPanel.webview.html).toContain('"state":"indexing"');
   });
 });

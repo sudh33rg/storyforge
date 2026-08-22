@@ -192,47 +192,7 @@ export class SemanticIndexer {
     let totalLength = 0;
 
     for (const node of nodes) {
-      this.documents.set(node.id, node);
-
-      const textParts: string[] = [
-        node.name,
-        node.qualifiedName,
-        node.description || '',
-        node.type,
-      ];
-
-      const data = node.data as unknown as Record<string, unknown>;
-      if (data) {
-        if (typeof data.filePath === 'string') textParts.push(data.filePath);
-        if (typeof data.path === 'string') textParts.push(data.path);
-        if (typeof data.documentation === 'string') textParts.push(data.documentation);
-        if (typeof data.tableName === 'string') textParts.push(data.tableName);
-        if (typeof data.serviceName === 'string') textParts.push(data.serviceName);
-        if (Array.isArray(data.columns)) {
-          textParts.push(data.columns.map((c: any) => c.name).join(' '));
-        }
-      }
-
-      const fullText = textParts.join(' ');
-      const tokens = tokenizeCode(fullText);
-      this.docLengths.set(node.id, tokens.length);
-      totalLength += tokens.length;
-
-      // 1. Build Lexical Inverted Index
-      const termFreq = new Map<string, number>();
-      for (const token of tokens) {
-        termFreq.set(token, (termFreq.get(token) || 0) + 1);
-
-        if (!this.invertedIndex.has(token)) {
-          this.invertedIndex.set(token, new Set());
-        }
-        this.invertedIndex.get(token)!.add(node.id);
-      }
-      this.docTermFreqs.set(node.id, termFreq);
-
-      // 2. Build Dense Embedding Vector
-      const denseVec = computeDenseEmbedding(fullText);
-      this.docVectors.set(node.id, denseVec);
+      totalLength += this.indexNode(node);
     }
 
     this.totalDocCount = nodes.length;
@@ -244,6 +204,57 @@ export class SemanticIndexer {
       denseVectors: this.docVectors.size,
       avgDocLength: Math.round(this.avgDocLength),
     });
+  }
+
+  /** Build the same index cooperatively for large persisted repositories. */
+  async indexNodesAsync(nodes: GraphNode[], batchSize = 500): Promise<void> {
+    this.clear();
+    let totalLength = 0;
+
+    for (let i = 0; i < nodes.length; i++) {
+      totalLength += this.indexNode(nodes[i]!);
+      if ((i + 1) % batchSize === 0) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 0));
+      }
+    }
+
+    this.totalDocCount = nodes.length;
+    this.avgDocLength = this.totalDocCount > 0 ? totalLength / this.totalDocCount : 1;
+    log.info('Hybrid semantic index built', {
+      documents: this.totalDocCount,
+      uniqueTerms: this.invertedIndex.size,
+      denseVectors: this.docVectors.size,
+      avgDocLength: Math.round(this.avgDocLength),
+    });
+  }
+
+  private indexNode(node: GraphNode): number {
+    this.documents.set(node.id, node);
+
+    const textParts: string[] = [node.name, node.qualifiedName, node.description || '', node.type];
+    const data = node.data as unknown as Record<string, unknown>;
+    if (data) {
+      if (typeof data.filePath === 'string') textParts.push(data.filePath);
+      if (typeof data.path === 'string') textParts.push(data.path);
+      if (typeof data.documentation === 'string') textParts.push(data.documentation);
+      if (typeof data.tableName === 'string') textParts.push(data.tableName);
+      if (typeof data.serviceName === 'string') textParts.push(data.serviceName);
+      if (Array.isArray(data.columns)) textParts.push(data.columns.map((c: any) => c.name).join(' '));
+    }
+
+    const fullText = textParts.join(' ');
+    const tokens = tokenizeCode(fullText);
+    this.docLengths.set(node.id, tokens.length);
+
+    const termFreq = new Map<string, number>();
+    for (const token of tokens) {
+      termFreq.set(token, (termFreq.get(token) || 0) + 1);
+      if (!this.invertedIndex.has(token)) this.invertedIndex.set(token, new Set());
+      this.invertedIndex.get(token)!.add(node.id);
+    }
+    this.docTermFreqs.set(node.id, termFreq);
+    this.docVectors.set(node.id, computeDenseEmbedding(fullText));
+    return tokens.length;
   }
 
   /**

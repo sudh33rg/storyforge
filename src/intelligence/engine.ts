@@ -44,6 +44,9 @@ import { McpServer } from './mcp/mcpServer.js';
 
 const log = createLogger('intelligence:engine');
 
+/** Let the extension host deliver pending webview messages between phases. */
+const yieldToEventLoop = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
+
 // ─── Engine State ────────────────────────────────────────────────────────────
 
 export type EngineState =
@@ -105,6 +108,12 @@ export class IntelligenceEngine {
   private readonly eventHandlers: EngineEventHandler[] = [];
 
   constructor(private readonly config: IntelligenceEngineConfig) {
+    // Auto-scan is scheduled by the extension after activation. Mark the
+    // engine as busy up front so a dashboard opened in that small window shows
+    // progress instead of an inaccurate "unavailable" state.
+    if (config.autoScan) {
+      this.state = 'scanning';
+    }
     this.graph = new KnowledgeGraph();
     this.generationTracker = new GenerationTracker(config.workspaceRoot);
     this.symbolIndex = new SymbolIndex();
@@ -127,6 +136,17 @@ export class IntelligenceEngine {
   async initialize(): Promise<void> {
     log.info('Initializing intelligence engine');
 
+    // Give activation-time commands (especially Open Dashboard) a chance to
+    // run before reading a potentially very large persisted graph.
+    await yieldToEventLoop();
+
+    // Surface the background startup work immediately. This lets the dashboard
+    // render its progress state even while the persisted graph is being loaded
+    // or the first scan is starting.
+    if (this.config.autoScan) {
+      this.setState('scanning');
+    }
+
     const loaded = await loadGraph(this.graph, this.config.workspaceRoot);
     await this.generationTracker.load();
 
@@ -135,7 +155,11 @@ export class IntelligenceEngine {
       // Rehydrate it before exposing the ready state so a restored workspace
       // cannot report zero indexed files or treat every file as new.
       this.rebuildFileIndex();
-      this.rebuildIndexes();
+      this.setState('updating');
+      // Keep the renderer responsive between graph restore and the expensive
+      // symbol/semantic index rebuild for large persisted repositories.
+      await yieldToEventLoop();
+      await this.rebuildIndexesAsync();
       this.setState('ready');
       log.info('Intelligence loaded from disk', {
         generation: this.graph.getGeneration(),
@@ -184,6 +208,7 @@ export class IntelligenceEngine {
       this.emit('scan-started', { totalFiles: scanResult.totalFiles });
 
       this.setState('analyzing');
+      await yieldToEventLoop();
 
       // Step 2: Increment generation and reset graph
       this.graph.clear();
@@ -201,6 +226,7 @@ export class IntelligenceEngine {
         projects,
         generation,
       );
+      await yieldToEventLoop();
 
       // Step 5: Build relationships (Imports, Type refs, API flows, Foreign keys)
       const relResult = buildRelationships(
@@ -208,6 +234,7 @@ export class IntelligenceEngine {
         scanResult.parseResults,
         generation,
       );
+      await yieldToEventLoop();
 
       // Step 6: Analyze architecture & patterns
       this.architectureReport = analyzeArchitecture(
@@ -221,14 +248,17 @@ export class IntelligenceEngine {
         this.graph,
         scanResult.parseResults,
       );
+      await yieldToEventLoop();
 
       // Step 7: Rebuild indexes & Semantic BM25 index
-      this.rebuildIndexes();
+      await this.rebuildIndexesAsync();
+      await yieldToEventLoop();
 
       // Step 8: Update file index
       for (const file of scanResult.files) {
         this.fileIndex.set({ ...file, generation });
       }
+      await yieldToEventLoop();
 
       // Step 9: Record generation
       const duration = performance.now() - startTime;
@@ -251,6 +281,7 @@ export class IntelligenceEngine {
 
       // Step 10: Persist atomically
       await this.save();
+      await yieldToEventLoop();
 
       this.setState('ready');
       this.emit('scan-completed', {
@@ -615,6 +646,43 @@ export class IntelligenceEngine {
 
     // Rebuild semantic BM25 index across all graph nodes
     this.semanticIndexer.indexNodes(this.graph.getAllNodes());
+
+    log.debug('Indexes rebuilt', {
+      symbolCount: this.symbolIndex.size,
+      graphNodesCount: this.graph.getAllNodes().length,
+    });
+  }
+
+  /** Cooperative variant used by startup/full scans with very large graphs. */
+  private async rebuildIndexesAsync(): Promise<void> {
+    this.symbolIndex.clear();
+
+    const nodes = [
+      ...this.graph.getNodesByType('symbol'),
+      ...this.graph.getNodesByType('component'),
+    ];
+
+    for (let i = 0; i < nodes.length; i++) {
+      const node = nodes[i]!;
+      const data = node.data as {
+        filePath?: string;
+        language?: string;
+        symbolKind?: string;
+      };
+
+      this.symbolIndex.add({
+        id: node.id,
+        name: node.name,
+        qualifiedName: node.qualifiedName,
+        kind: (data.symbolKind as SymbolIndexEntry['kind']) || 'variable',
+        language: (data.language as SymbolIndexEntry['language']) || 'typescript',
+        filePath: data.filePath || '',
+      });
+
+      if ((i + 1) % 1000 === 0) await yieldToEventLoop();
+    }
+
+    await this.semanticIndexer.indexNodesAsync(this.graph.getAllNodes());
 
     log.debug('Indexes rebuilt', {
       symbolCount: this.symbolIndex.size,
